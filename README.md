@@ -56,3 +56,19 @@ npm run player:pi     # Raspberry Pi: output straight to HDMI (DRM/KMS)
 ```
 
 Then type `load <path or URL>` to play a file, and `help` for the command list.
+
+## Playing a torrent
+
+```bash
+npm run play -- "<magnet link or path to .torrent>"
+```
+
+The largest video file in the torrent is downloaded sequentially to `$TMPDIR/tvbox-cache`
+and played in mpv while it downloads. Add `--serve-only` to skip mpv and only print the
+local stream URL.
+
+Example with a legal test torrent ([Sintel](https://durian.blender.org/), CC-BY):
+
+```bash
+npm run play -- "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&ws=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2F&xs=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2Fsintel.torrent"
+```

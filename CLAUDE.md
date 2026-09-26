@@ -58,7 +58,7 @@ Raspberry Pi OS Lite (64-bit), Node.js 18+ (ESM), WebTorrent, mpv, Fastify, WebS
    - Управление через IPC: пауза, громкость, перемотка, дорожки, стоп.
    - Состояние (позиция, длительность, громкость, буферизация) обновляется в реальном времени.
    - Ещё не сделано: экран ожидания (заставка на ТВ).
-2. **Торрент-движок.** ← СЛЕДУЮЩИЙ
+2. **Торрент-движок.** ← IN PROGRESS (POC done: `npm run play -- "<magnet>"`, see `torrent/`; cache cleanup postponed)
    - Принимает magnet-ссылку или .torrent, сам выбирает самый крупный видеофайл.
    - Качает последовательно, при перемотке меняет приоритет кусков.
    - Раздаёт файл локальным HTTP-сервером с поддержкой Range.
@@ -96,11 +96,25 @@ Raspberry Pi OS Lite (64-bit), Node.js 18+ (ESM), WebTorrent, mpv, Fastify, WebS
 tvbox/
   CLAUDE.md
   README.md           # install and run instructions (mpv, Node.js)
-  package.json        # "type": "module", скрипты: npm run player / npm run player:pi
+  package.json        # "type": "module", скрипты: npm run player / player:pi / play / play:pi
   player/
     player.js         # класс MpvPlayer (EventEmitter)
     cli.js            # консольный пульт для ручной проверки
+  torrent/
+    engine.js         # TorrentEngine: WebTorrent + local HTTP server with Range
+    cli.js            # magnet/.torrent → engine → mpv, prints download status
 ```
+
+### `torrent/engine.js`, class `TorrentEngine` (POC)
+
+- `open(torrentId)`: magnet / .torrent path / info hash. Added with `deselect: true`, then only the largest video file is selected (WebTorrent default strategy is `sequential`).
+- `serve()`: HTTP server on `127.0.0.1` (random port), returns the file URL for mpv. Supports single `Range` requests (206/416) and HEAD.
+- Seeking: each Range request calls `file.createReadStream({start, end})`, which makes WebTorrent prioritise the pieces at that position. No custom priority logic yet.
+- `status()` and the `status` event (every 1 s): `{name, progress, downloaded, length, downloadSpeed, uploadSpeed, peers}`.
+- Cache: `$TMPDIR/tvbox-cache`. Nothing is deleted yet (cleanup postponed).
+- `cli.js --serve-only`: serves without starting mpv (handy for testing with curl).
+- Tested on Windows with the Sintel torrent (CC-BY): metadata, file choice, Range and far seeks work. Full playback in mpv not yet checked.
+- npm warns that install scripts for `node-datachannel` / `bufferutil` / `utf-8-validate` were skipped. This is harmless: `node-datachannel` ships a prebuilt binary (WebRTC peers work), and the other two are optional speed-ups for `ws`.
 
 ### `player/player.js`, класс `MpvPlayer`
 

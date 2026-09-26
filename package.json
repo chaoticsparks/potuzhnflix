@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "player": "node player/cli.js",
-    "player:pi": "node player/cli.js --pi"
+    "player:pi": "node player/cli.js --pi",
+    "play": "node torrent/cli.js",
+    "play:pi": "node torrent/cli.js --pi"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "webtorrent": "^3.0.21"
   }
 }
