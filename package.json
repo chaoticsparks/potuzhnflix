@@ -1,0 +1,13 @@
+{
+  "name": "tvbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "player": "node player/cli.js",
+    "player:pi": "node player/cli.js --pi"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
