@@ -44,32 +44,39 @@ export class TvBox extends EventEmitter {
   }
 
   // Download without playing
-  download({ torrent, file, title }) {
-    return this.library.add({ torrent, file, title });
+  download({ torrent, file, files, title }) {
+    return this.library.add({ torrent, file, files, title });
   }
 
-  // Plays a library item ({ id }) or a new torrent ({ torrent, file, title }, added to the library).
+  // Plays a library item ({ id, episode? }) or a new torrent ({ torrent, file?, files?, title? },
+  // added to the library). `episode` defaults to the last one watched.
   // Resolves when mpv has started loading; the long part is torrent metadata.
-  async play({ id, torrent, file, title }) {
+  async play({ id, episode, torrent, file, files, title }) {
     if (!id && !torrent) throw httpError(400, 'id or torrent is required');
     const session = ++this.session;
-    await this.#release();
+    // Switching episodes of the same item keeps it marked as playing (no download reshuffle)
+    if (!id || id !== this.current) await this.#release();
     this.#set({ phase: 'loading', title: title ?? this.library.get(id)?.title ?? null, error: null });
 
     try {
-      const item = id ? this.library.get(id) : await this.library.add({ torrent, file, title });
+      const item = id ? this.library.get(id) : await this.library.add({ torrent, file, files, title });
       if (!item) throw httpError(404, `No such download: ${id}`);
       if (session !== this.session) return;
-      const source = await this.library.stream(item.id);
+      const source = await this.library.stream(item.id, episode);
       if (session !== this.session) {
-        await this.library.release(item.id);   // no-op if a newer play() already took over
+        // Cancelled by stop() before this item became current. When switching episodes of the
+        // current item, stop() / the newer play() already handled it, and releasing here would
+        // release the newer episode too.
+        if (this.current !== item.id) await this.library.release(item.id);
         return;
       }
       this.current = item.id;
       const player = await this.#ensurePlayer();
       if (session !== this.session) return;
-      await player.load(source, { title: item.title });
-      this.#set({ phase: 'playing', title: item.title });
+      const playing = this.library.get(item.id);
+      const name = playing.files.length > 1 ? `${playing.title} · ${playing.files[playing.episode].name}` : playing.title;
+      await player.load(source, { title: name });
+      this.#set({ phase: 'playing', title: playing.title });
     } catch (err) {
       if (session !== this.session) return;   // cancelled by stop() or a newer play()
       await this.#release();
@@ -79,6 +86,7 @@ export class TvBox extends EventEmitter {
   }
 
   async control(action, value) {
+    if (action === 'next' || action === 'prev') return this.#step(action === 'next' ? 1 : -1);
     const fn = ACTIONS[action];
     if (!fn) throw httpError(400, `Unknown action: ${action}`);
     if (!this.player || this.phase !== 'playing') throw httpError(409, 'Nothing is playing');
@@ -111,6 +119,10 @@ export class TvBox extends EventEmitter {
       title: this.title,
       error: this.error,
       itemId: this.current,
+      // Position in the playlist (series episodes, film parts); null for a single file
+      episode: item && item.files.length > 1 ? {
+        index: item.episode, count: item.files.length, name: item.files[item.episode].name,
+      } : null,
       player: p && this.phase === 'playing' ? {
         paused: p.paused, position: p.position, duration: p.duration,
         volume: p.volume, buffering: p.buffering,
@@ -150,10 +162,27 @@ export class TvBox extends EventEmitter {
     return player;
   }
 
-  // 'stop' also fires when a new file replaces the old one, so only eof/error matter
+  // Next / previous entry of the playlist
+  async #step(delta) {
+    const item = this.current && this.library.get(this.current);
+    if (!item || this.phase !== 'playing') throw httpError(409, 'Nothing is playing');
+    const k = item.episode + delta;
+    if (k < 0 || k >= item.files.length) throw httpError(409, delta > 0 ? 'This is the last episode' : 'This is the first episode');
+    await this.play({ id: item.id, episode: k });
+  }
+
+  // 'stop' also fires when a new file replaces the old one, so only eof/error matter.
+  // At the end of an episode the next one starts; after the last one, playback stops.
   #onEndFile(e) {
     if (this.phase !== 'playing') return;
-    if (e.reason === 'eof') this.stop();
+    if (e.reason === 'eof') {
+      const item = this.current && this.library.get(this.current);
+      if (item && item.episode + 1 < item.files.length) {
+        this.play({ id: item.id, episode: item.episode + 1 }).catch(() => {});   // failure is shown via status
+      } else {
+        this.stop();
+      }
+    }
     else if (e.reason === 'error') this.#fail(new Error(`mpv could not play the file (${e.file_error ?? 'unknown error'})`));
   }
 

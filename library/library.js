@@ -1,12 +1,14 @@
 // library.js — downloads that survive restarts: add, pause/resume, delete, keep, auto-cleanup
 //
-// An item is one video file inside one torrent. Several items may share a torrent
-// (e.g. 1080p and 480p versions from the same Internet Archive item).
-// While something plays, all other downloads are paused so the stream gets the bandwidth.
+// An item is a playlist of video files inside one torrent: a film (one file), a film split
+// into parts, or the episodes of a series. Several items may share a torrent (e.g. 1080p and
+// 480p versions from the same Internet Archive item).
+// While something plays, all other downloads wait so the stream gets the bandwidth.
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { TorrentEngine, DEFAULT_CACHE_DIR, pickVideoFile, findFile } from '../torrent/engine.js';
+import { TorrentEngine, DEFAULT_CACHE_DIR, pickVideoFiles, findFile } from '../torrent/engine.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const GB = 1024 ** 3;
@@ -26,9 +28,9 @@ export class Library extends EventEmitter {
     this.policy = { ...DEFAULT_POLICY, ...policy };
     this.engine = new TorrentEngine({ dir });
     this.engine.on('error', (err) => this.emit('error', err));
-    this.engine.on('file-done', (infoHash, index) => this.#onFileDone(`${infoHash}-${index}`));
+    this.engine.on('file-done', (infoHash, index) => this.#onFileDone(infoHash, index));
     this.items = new Map();
-    this.playing = null;           // id of the item being played
+    this.playing = null;           // { id, episode } being played
     this.claims = new Set();       // adds in progress: { infoHash }
     this.syncing = Promise.resolve();
     this.saveTimer = null;
@@ -48,7 +50,7 @@ export class Library extends EventEmitter {
       // Refuse to start: with an empty library every download would be deleted as an orphan
       throw new Error(`${this.file} is corrupt (${err.message}). Fix or delete it.`);
     }
-    for (const item of saved) this.items.set(item.id, item);
+    for (const item of saved) this.items.set(item.id, migrate(item));
 
     await this.#deleteOrphans();
     await this.cleanup();
@@ -59,7 +61,8 @@ export class Library extends EventEmitter {
     this.sweeper = setInterval(() => this.cleanup().catch((err) => this.emit('error', err)), this.policy.sweepIntervalMs);
   }
 
-  // Starts (or reuses) a download; resolves once torrent metadata is known
+  // Starts (or reuses) a download; resolves once torrent metadata is known.
+  // `files` (paths, in play order) or `file` pick what to download; otherwise pickVideoFiles() decides.
   async add(request) {
     const claim = { infoHash: null };   // keeps #doSync from stopping the torrent before the item exists
     this.claims.add(claim);
@@ -71,27 +74,31 @@ export class Library extends EventEmitter {
     }
   }
 
-  async #add({ torrent, file, title }, claim) {
+  async #add({ torrent, file, files, title }, claim) {
     const t = await this.engine.add(torrent);
     claim.infoHash = t.infoHash;
-    const f = file ? findFile(t.files, file) : pickVideoFile(t.files);
-    if (!f) throw httpError(404, file ? `File not found in torrent: ${file}` : 'No video file found in torrent');
-    const index = t.files.indexOf(f);
-    const id = `${t.infoHash}-${index}`;
+
+    const wanted = files?.length ? files : file ? [file] : null;
+    const chosen = wanted
+      ? wanted.map((p) => findFile(t.files, p) ?? notFound(p))
+      : pickVideoFiles(t.files);
+    if (!chosen.length) throw httpError(404, 'No video file found in torrent');
+
+    const indexes = chosen.map((f) => t.files.indexOf(f));
+    const id = itemId(t.infoHash, indexes);
     const now = Date.now();
 
     let item = this.items.get(id);
     if (!item) {
-      await this.#ensureSpace(f.length, id);
+      await this.#ensureSpace(sum(chosen, 'length'), id);
       item = {
         id,
         infoHash: t.infoHash,
-        fileIndex: index,
-        title: title || f.name,
-        name: f.name,
-        path: f.path,
-        length: f.length,
-        downloaded: 0,
+        title: title || (chosen.length > 1 ? t.name : chosen[0].name),
+        files: chosen.map((f, i) => ({
+          index: indexes[i], name: f.name, path: f.path, length: f.length, downloaded: 0, done: false,
+        })),
+        episode: 0,             // last played entry of `files`
         state: 'downloading',   // downloading | paused | complete
         keep: false,
         addedAt: now,
@@ -110,39 +117,45 @@ export class Library extends EventEmitter {
     return this.view(item);
   }
 
-  // Marks an item as playing and returns what mpv should open: a local path or a stream URL
-  async stream(id) {
+  // Marks an episode as playing and returns what mpv should open: a local path or a stream URL.
+  // `episode` defaults to the last one played.
+  async stream(id, episode) {
     const item = this.#get(id);
+    const k = episode ?? item.episode ?? 0;
+    if (!Number.isInteger(k) || k < 0 || k >= item.files.length) {
+      throw httpError(400, `No episode ${k} (this has ${item.files.length})`);
+    }
+    const f = item.files[k];
     const now = Date.now();
+    item.episode = k;
     item.lastPlayedAt = now;
     item.lastActivityAt = now;
 
-    if (item.state === 'complete') {
-      const local = this.engine.filePath(item.infoHash, item.path);
-      const exists = await fs.stat(local).then((s) => s.size === item.length).catch(() => false);
+    if (f.done) {
+      const local = this.engine.filePath(item.infoHash, f.path);
+      const exists = await fs.stat(local).then((s) => s.size === f.length).catch(() => false);
       if (exists) {
-        this.playing = id;
-        await this.#sync();
+        this.playing = { id, episode: k };
+        await this.#sync();   // may still prefetch the next episode
         this.#changed();
         return local;
       }
       // File vanished from disk — download it again
-      item.state = 'downloading';
+      f.done = false;
+      f.downloaded = 0;
       item.completedAt = null;
-      item.downloaded = 0;
-    } else if (item.state === 'paused') {
-      item.state = 'downloading';
     }
+    if (item.state !== 'downloading') item.state = 'downloading';
 
-    this.playing = id;
+    this.playing = { id, episode: k };
     await this.#sync();
     this.#changed();
-    return this.engine.streamUrl(item.infoHash, item.fileIndex);
+    return this.engine.streamUrl(item.infoHash, f.index);
   }
 
   // Playback ended; other downloads continue. Ignored if a newer stream() took over.
   async release(id) {
-    if (this.playing !== id) return;
+    if (this.playing?.id !== id) return;
     this.playing = null;
     await this.#sync();
     this.#changed();
@@ -151,7 +164,7 @@ export class Library extends EventEmitter {
   async pause(id) {
     const item = this.#get(id);
     if (item.state !== 'downloading') return this.view(item);
-    if (this.playing === id) throw httpError(409, 'Cannot pause the film that is playing');
+    if (this.playing?.id === id) throw httpError(409, 'Cannot pause the film that is playing');
     item.state = 'paused';
     item.lastActivityAt = Date.now();
     await this.#sync();
@@ -162,7 +175,7 @@ export class Library extends EventEmitter {
   async resume(id) {
     const item = this.#get(id);
     if (item.state !== 'paused') return this.view(item);
-    await this.#ensureSpace(item.length - item.downloaded, id);
+    await this.#ensureSpace(remaining(item), id);
     item.state = 'downloading';
     item.lastActivityAt = Date.now();
     await this.#sync();
@@ -180,14 +193,18 @@ export class Library extends EventEmitter {
 
   async remove(id) {
     const item = this.#get(id);
-    if (this.playing === id) throw httpError(409, 'Stop playback before deleting this film');
+    if (this.playing?.id === id) throw httpError(409, 'Stop playback before deleting this film');
     this.items.delete(id);
     await this.#sync();
 
-    const siblings = [...this.items.values()].some((i) => i.infoHash === item.infoHash);
-    if (siblings) {
-      // Other files of this torrent are still in use: delete only this one
-      await fs.rm(this.engine.filePath(item.infoHash, item.path), { force: true, maxRetries: 5 }).catch(() => {});
+    const siblings = [...this.items.values()].filter((i) => i.infoHash === item.infoHash);
+    if (siblings.length) {
+      // Other items use this torrent: delete only files that none of them needs
+      const used = new Set(siblings.flatMap((i) => i.files.map((f) => f.index)));
+      for (const f of item.files) {
+        if (used.has(f.index)) continue;
+        await fs.rm(this.engine.filePath(item.infoHash, f.path), { force: true, maxRetries: 5 }).catch(() => {});
+      }
     } else {
       await this.engine.deleteTorrentData(item.infoHash);
     }
@@ -199,7 +216,7 @@ export class Library extends EventEmitter {
     const now = Date.now();
     for (const item of [...this.items.values()]) {
       const expires = this.expiresAt(item);
-      if (expires !== null && expires <= now && this.playing !== item.id) await this.remove(item.id);
+      if (expires !== null && expires <= now && this.playing?.id !== item.id) await this.remove(item.id);
     }
     await this.#ensureSpace(0).catch(() => {});   // not being able to free enough is not an error here
   }
@@ -227,20 +244,28 @@ export class Library extends EventEmitter {
   // Public shape of an item, with live torrent stats
   view(item) {
     const stats = this.engine.torrentStats(item.infoHash);
-    const active = item.state === 'downloading' && (!this.playing || this.playing === item.id);
+    const playing = this.playing?.id === item.id;
+    const waiting = item.state === 'downloading' && !!this.playing && !playing;
+    const active = (item.state === 'downloading' || playing) && !waiting && stats;
+    const length = sum(item.files, 'length');
+    const downloaded = sum(item.files, 'downloaded');
     return {
       id: item.id,
       title: item.title,
-      name: item.name,
-      length: item.length,
-      downloaded: item.downloaded,
-      progress: item.length ? item.downloaded / item.length : 0,
+      length,
+      downloaded,
+      progress: length ? downloaded / length : 0,
       state: item.state,
-      waiting: item.state === 'downloading' && !active,   // paused for now because another film plays
-      playing: this.playing === item.id,
+      waiting,   // paused for now because another film plays
+      playing,
       keep: item.keep,
-      downloadSpeed: active && stats ? stats.downloadSpeed : 0,
-      peers: active && stats ? stats.peers : 0,
+      downloadSpeed: active ? stats.downloadSpeed : 0,
+      peers: active ? stats.peers : 0,
+      episode: item.episode,
+      files: item.files.map((f) => ({
+        name: f.name, length: f.length, downloaded: f.downloaded,
+        progress: f.length ? f.downloaded / f.length : 0, done: f.done,
+      })),
       addedAt: item.addedAt,
       completedAt: item.completedAt,
       lastPlayedAt: item.lastPlayedAt,
@@ -250,7 +275,7 @@ export class Library extends EventEmitter {
 
   async storage() {
     const { free, total } = await diskSpace(this.dir);
-    const used = [...this.items.values()].reduce((sum, i) => sum + i.length, 0);
+    const used = [...this.items.values()].reduce((s, i) => s + sum(i.files, 'length'), 0);
     return { dir: this.dir, free, total, used, policy: this.policy };
   }
 
@@ -268,15 +293,25 @@ export class Library extends EventEmitter {
     return item;
   }
 
-  #onFileDone(id) {
-    const item = this.items.get(id);
-    if (!item || item.state === 'complete') return;
+  // A torrent file finished; it may belong to several items
+  #onFileDone(infoHash, index) {
     const now = Date.now();
-    item.state = 'complete';
-    item.downloaded = item.length;
-    item.completedAt = now;
-    item.lastActivityAt = now;
-    this.#sync();   // stops the torrent unless it is still being streamed
+    let changed = false;
+    for (const item of this.items.values()) {
+      if (item.infoHash !== infoHash) continue;
+      const f = item.files.find((x) => x.index === index);
+      if (!f || f.done) continue;
+      f.done = true;
+      f.downloaded = f.length;
+      item.lastActivityAt = now;
+      if (item.files.every((x) => x.done)) {
+        item.state = 'complete';
+        item.completedAt = now;
+      }
+      changed = true;
+    }
+    if (!changed) return;
+    this.#sync();   // stops the torrent unless something still needs it
     this.#changed();
   }
 
@@ -288,12 +323,19 @@ export class Library extends EventEmitter {
 
   async #doSync() {
     const wanted = new Map();   // infoHash → file indexes that should download
+    const want = (infoHash, f) => {
+      if (f.done) return;
+      if (!wanted.has(infoHash)) wanted.set(infoHash, new Set());
+      wanted.get(infoHash).add(f.index);
+    };
     for (const item of this.items.values()) {
-      const streaming = this.playing === item.id && item.state !== 'complete';
-      const downloading = item.state === 'downloading' && !this.playing;
-      if (!streaming && !downloading) continue;
-      if (!wanted.has(item.infoHash)) wanted.set(item.infoHash, []);
-      wanted.get(item.infoHash).push(item.fileIndex);
+      if (this.playing?.id === item.id) {
+        // The episode being watched and the next one, so it starts without waiting
+        const k = this.playing.episode;
+        for (const f of item.files.slice(k, k + 2)) want(item.infoHash, f);
+      } else if (item.state === 'downloading' && !this.playing) {
+        for (const f of item.files) want(item.infoHash, f);
+      }
     }
 
     // Stop torrents nobody needs any more (keeps their files). Torrents still loading
@@ -311,10 +353,10 @@ export class Library extends EventEmitter {
         this.emit('error', new Error(`Could not load torrent ${infoHash}: ${err.message}`));
         continue;
       }
-      this.engine.setSelection(infoHash, indexes);
+      this.engine.setSelection(infoHash, [...indexes]);
       // Files already complete on disk (checked while the torrent was loading)
       for (const index of indexes) {
-        if (this.engine.fileStats(infoHash, index)?.done) this.#onFileDone(`${infoHash}-${index}`);
+        if (this.engine.fileStats(infoHash, index)?.done) this.#onFileDone(infoHash, index);
       }
     }
   }
@@ -324,27 +366,30 @@ export class Library extends EventEmitter {
     let changed = false;
     for (const item of this.items.values()) {
       if (item.state === 'complete') continue;
-      const stats = this.engine.fileStats(item.infoHash, item.fileIndex);
-      if (!stats || stats.downloaded === item.downloaded) continue;
-      if (stats.downloaded > item.downloaded) item.lastActivityAt = Date.now();
-      item.downloaded = stats.downloaded;
-      changed = true;
+      for (const f of item.files) {
+        if (f.done) continue;
+        const stats = this.engine.fileStats(item.infoHash, f.index);
+        if (!stats || stats.downloaded === f.downloaded) continue;
+        if (stats.downloaded > f.downloaded) item.lastActivityAt = Date.now();
+        f.downloaded = stats.downloaded;
+        changed = true;
+      }
     }
     if (changed) this.#changed();
   }
 
   // Frees space for `needed` more bytes plus what active downloads still have to fetch
   async #ensureSpace(needed, forId = null) {
-    const remaining = [...this.items.values()]
+    const pending = [...this.items.values()]
       .filter((i) => i.state === 'downloading' && i.id !== forId)
-      .reduce((sum, i) => sum + (i.length - i.downloaded), 0);
-    const required = needed + remaining + this.policy.minFreeBytes;
+      .reduce((s, i) => s + remaining(i), 0);
+    const required = needed + pending + this.policy.minFreeBytes;
 
     let { free } = await diskSpace(this.dir);
     if (free >= required) return;
 
     const candidates = [...this.items.values()]
-      .filter((i) => !i.keep && i.id !== forId && i.id !== this.playing)
+      .filter((i) => !i.keep && i.id !== forId && i.id !== this.playing?.id)
       .sort((a, b) => a.lastActivityAt - b.lastActivityAt);
     for (const item of candidates) {
       if (free >= required) break;
@@ -360,25 +405,58 @@ export class Library extends EventEmitter {
   async #deleteOrphans() {
     const known = new Set([...this.items.values()].map((i) => i.infoHash));
     const dirs = await fs.readdir(this.engine.dataDir).catch(() => []);
-    const metas = (await fs.readdir(this.engine.torrentsDir).catch(() => [])).map((n) => n.replace(/.torrent$/, ''));
+    const metas = (await fs.readdir(this.engine.torrentsDir).catch(() => [])).map((n) => n.replace(/\.torrent$/, ''));
     for (const infoHash of new Set([...dirs, ...metas])) {
       if (!known.has(infoHash)) await this.engine.deleteTorrentData(infoHash);
     }
   }
 
+  // Saves within 2 s of a change. A pending timer is not restarted: progress changes every
+  // second while downloading, and a restarting timer would never fire.
   #changed() {
-    clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.#save().catch((err) => this.emit('error', err)), 2000);
+    this.saveTimer ??= setTimeout(() => this.#save().catch((err) => this.emit('error', err)), 2000);
     this.emit('changed');
   }
 
-  // Write to a temp file and rename, so a crash never leaves a half-written library.json
-  async #save() {
+  // Write to a temp file and rename, so a crash never leaves a half-written library.json.
+  // Serialised: two writes must not share the temp file.
+  #save() {
     clearTimeout(this.saveTimer);
-    const tmp = `${this.file}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify({ version: 1, items: [...this.items.values()] }, null, 2));
-    await fs.rename(tmp, this.file);
+    this.saveTimer = null;
+    this.saving = (this.saving ?? Promise.resolve()).catch(() => {}).then(async () => {
+      const tmp = `${this.file}.tmp`;
+      await fs.writeFile(tmp, JSON.stringify({ version: 2, items: [...this.items.values()] }, null, 2));
+      await fs.rename(tmp, this.file);
+    });
+    return this.saving;
   }
+}
+
+// Single file: "<infoHash>-<index>"; playlist: "<infoHash>-p<hash of the indexes>"
+function itemId(infoHash, indexes) {
+  if (indexes.length === 1) return `${infoHash}-${indexes[0]}`;
+  const h = crypto.createHash('sha1').update(indexes.join(',')).digest('hex').slice(0, 8);
+  return `${infoHash}-p${h}`;
+}
+
+// v1 items held a single file in flat fields
+function migrate(item) {
+  if (item.files) return item;
+  const { fileIndex, name, path: p, length, downloaded, ...rest } = item;
+  const done = item.state === 'complete';
+  return {
+    ...rest,
+    files: [{ index: fileIndex, name, path: p, length, downloaded: done ? length : downloaded, done }],
+    episode: 0,
+  };
+}
+
+function remaining(item) {
+  return item.files.reduce((s, f) => s + (f.done ? 0 : f.length - f.downloaded), 0);
+}
+
+function sum(list, key) {
+  return list.reduce((s, x) => s + x[key], 0);
 }
 
 async function diskSpace(dir) {
@@ -388,6 +466,10 @@ async function diskSpace(dir) {
 
 function fmtGB(bytes) {
   return `${(bytes / GB).toFixed(1)} GB`;
+}
+
+function notFound(p) {
+  throw httpError(404, `File not found in torrent: ${p}`);
 }
 
 // Errors with a status code the HTTP layer can pass through

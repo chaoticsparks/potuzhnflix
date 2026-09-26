@@ -73,8 +73,10 @@ Searches Internet Archive (public-domain feature films); a pasted magnet link al
 npm run play -- "<magnet link or path to .torrent>"
 ```
 
-The largest video file in the torrent (or the one given with `--file`) is added to the download
-library and played in mpv while it downloads. Add `--serve-only` to skip mpv and only print the
+The torrent is added to the download library and played in mpv while it downloads. A torrent
+with several videos (a series, or a film split into parts) plays as a playlist: episodes in
+order, the next one starts automatically. `--episode <n>` starts from episode `n`; `--file`
+(repeatable) picks files yourself. Add `--serve-only` to skip mpv and only print the
 local stream URL.
 
 Example with a legal test torrent ([Sintel](https://durian.blender.org/), CC-BY):
@@ -82,6 +84,16 @@ Example with a legal test torrent ([Sintel](https://durian.blender.org/), CC-BY)
 ```bash
 npm run play -- "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&ws=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2F&xs=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2Fsintel.torrent"
 ```
+
+## Series
+
+A series is a torrent with several episodes. Paste its magnet link (or .torrent link) the same
+way as a film; search only finds films. The box plays the episodes in order and remembers where
+you stopped: playing the series again continues from the last episode.
+
+- Episodes are sorted naturally (`E2` before `E10`); samples, trailers and extras are skipped.
+- While you watch an episode, the next one downloads too, so it starts right away.
+- `next` / `prev` control actions switch episodes.
 
 ## Downloads
 
@@ -112,7 +124,7 @@ address to open on your phone. The remote UI arrives in the next stage; until th
 | Method | Path | Body / query |
 | --- | --- | --- |
 | GET | `/api/search` | `?q=<title or magnet>` |
-| POST | `/api/play` | `{ "torrent": "...", "file": "...", "title": "..." }` (fields from a search result) or `{ "id": "..." }` (from the library) |
+| POST | `/api/play` | `{ "torrent": "...", "file": "...", "title": "..." }` (fields from a search result, or just `torrent` for a magnet) or `{ "id": "...", "episode": 0 }` (from the library; `episode` optional) |
 | POST | `/api/control` | `{ "action": "pause" }`, `{ "action": "seekBy", "value": 10 }`, … |
 | POST | `/api/stop` | |
 | GET | `/api/status`, `/api/tracks` | |
@@ -123,4 +135,4 @@ address to open on your phone. The remote UI arrives in the next stage; until th
 | GET | `/api/storage` | free / total / used disk space and cleanup settings |
 | WS | `/ws` | pushes `{ "type": "status", ... }` (≤ 4/s) and `{ "type": "downloads", "items": [...] }` (≤ 1/s) |
 
-Control actions: `play`, `pause`, `toggle`, `seekBy`, `seekTo`, `volume`, `volumeBy`, `audio`, `sub`.
+Control actions: `play`, `pause`, `toggle`, `seekBy`, `seekTo`, `volume`, `volumeBy`, `audio`, `sub`, `next`, `prev`.

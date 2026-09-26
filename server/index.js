@@ -31,6 +31,7 @@ const torrentBody = {
   properties: {
     torrent: { type: 'string', minLength: 1 },
     file: { type: 'string' },
+    files: { type: 'array', items: { type: 'string' }, minItems: 1 },   // playlist, in play order
     title: { type: 'string' },
   },
 };
@@ -41,9 +42,15 @@ app.get('/api/search', {
   schema: { querystring: { type: 'object', required: ['q'], properties: { q: { type: 'string' } } } },
 }, (req) => box.search(req.query.q));
 
-// Body: { id } to play from the library, or { torrent, file?, title? } for a new film
+// Body: { id, episode? } to play from the library, or { torrent, file?, files?, title? } for a new one.
+// Without file/files, a torrent with several videos (series) becomes a playlist.
 app.post('/api/play', {
-  schema: { body: { ...torrentBody, properties: { ...torrentBody.properties, id: { type: 'string' } } } },
+  schema: {
+    body: {
+      ...torrentBody,
+      properties: { ...torrentBody.properties, id: { type: 'string' }, episode: { type: 'integer', minimum: 0 } },
+    },
+  },
 }, async (req) => {
   await box.play(req.body);
   return box.status();

@@ -207,11 +207,32 @@ export class TorrentEngine extends EventEmitter {
   }
 }
 
-// Largest file with a known video extension
-export function pickVideoFile(files) {
-  return files
-    .filter((f) => VIDEO_TYPES[path.extname(f.name).toLowerCase()])
-    .sort((a, b) => b.length - a.length)[0];
+const NOT_MAIN = /\b(sample|trailer|extras?|featurettes?|bonus|behind[\s._-]the[\s._-]scenes)\b/i;
+// Preferred container when a torrent has the same video in several formats. Formats that usually
+// carry H.264/H.265 come first: the Pi decodes those in hardware; Theora (.ogv) and VP8/9 it doesn't.
+const FORMAT_RANK = ['.mkv', '.mp4', '.m4v', '.avi', '.mov', '.m2ts', '.ts', '.mpg', '.mpeg', '.webm', '.ogv'];
+const formatRank = (name) => FORMAT_RANK.indexOf(path.extname(name).toLowerCase());
+const naturalOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
+
+// The videos to play, in order: one film, a film split into parts, or the episodes of a series.
+// Skips samples/extras, files under 5 % of the largest one, and duplicate formats of the same
+// video (Internet Archive torrents hold "ep1.mp4" + "ep1.ogv" + "ep1_512kb.mp4": best format, then largest, wins).
+export function pickVideoFiles(files) {
+  const videos = files.filter((f) =>
+    VIDEO_TYPES[path.extname(f.name).toLowerCase()] && !NOT_MAIN.test(f.path.replace(/\\/g, '/')));
+  if (!videos.length) return [];
+
+  const largest = Math.max(...videos.map((f) => f.length));
+  const byStem = new Map();
+  for (const f of videos) {
+    if (f.length < largest * 0.05) continue;   // unnamed samples / trailers (usually < 2 % of the main file)
+    const stem = f.path.replace(/\\/g, '/').replace(/\.[^./]+$/, '').replace(/(_512kb|\.ia)$/i, '').toLowerCase();
+    const prev = byStem.get(stem);
+    const better = !prev || formatRank(f.name) < formatRank(prev.name) ||
+      (formatRank(f.name) === formatRank(prev.name) && f.length > prev.length);
+    if (better) byStem.set(stem, f);
+  }
+  return [...byStem.values()].sort((a, b) => naturalOrder(a.path, b.path));
 }
 
 // Match by path relative to the torrent root; multi-file torrents prefix paths with the torrent name
