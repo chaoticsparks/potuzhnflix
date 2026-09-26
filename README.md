@@ -5,7 +5,7 @@ See [CLAUDE.md](CLAUDE.md) for the full project description.
 
 ## Requirements
 
-- [Node.js](https://nodejs.org/) 18 or newer
+- [Node.js](https://nodejs.org/) 20 or newer
 - [mpv](https://mpv.io/) available on `PATH` as the `mpv` command
 
 ## Installing mpv
@@ -73,8 +73,8 @@ Searches Internet Archive (public-domain feature films); a pasted magnet link al
 npm run play -- "<magnet link or path to .torrent>"
 ```
 
-The largest video file in the torrent is downloaded sequentially to `$TMPDIR/tvbox-cache`
-and played in mpv while it downloads. Add `--serve-only` to skip mpv and only print the
+The largest video file in the torrent (or the one given with `--file`) is added to the download
+library and played in mpv while it downloads. Add `--serve-only` to skip mpv and only print the
 local stream URL.
 
 Example with a legal test torrent ([Sintel](https://durian.blender.org/), CC-BY):
@@ -82,3 +82,45 @@ Example with a legal test torrent ([Sintel](https://durian.blender.org/), CC-BY)
 ```bash
 npm run play -- "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&ws=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2F&xs=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2Fsintel.torrent"
 ```
+
+## Downloads
+
+Everything played or downloaded goes into the download library, stored in `$TMPDIR/tvbox-cache`
+(set `TVBOX_CACHE` to change it; on the Pi this will be the USB drive). It survives restarts:
+unfinished downloads continue where they stopped.
+
+- While a film plays, other downloads wait, so the stream gets all the bandwidth.
+- An unfinished film keeps downloading after you stop watching, so it starts instantly next time.
+- Finished films play straight from disk.
+- Automatic cleanup (films marked "keep" are never touched):
+  - finished films: 30 days after last watched;
+  - unfinished downloads: after 7 days without progress;
+  - when free disk space drops under 5 GB: least recently used films first.
+
+Don't run `npm start` and `npm run play` at the same time: they would share the same library.
+
+## Running the backend
+
+```bash
+npm start        # desktop
+npm run start:pi # Raspberry Pi: mpv outputs straight to HDMI
+```
+
+Listens on port 8080 on all interfaces (override with `PORT` / `HOST`) and prints the LAN
+address to open on your phone. The remote UI arrives in the next stage; until then, use the API:
+
+| Method | Path | Body / query |
+| --- | --- | --- |
+| GET | `/api/search` | `?q=<title or magnet>` |
+| POST | `/api/play` | `{ "torrent": "...", "file": "...", "title": "..." }` (fields from a search result) or `{ "id": "..." }` (from the library) |
+| POST | `/api/control` | `{ "action": "pause" }`, `{ "action": "seekBy", "value": 10 }`, … |
+| POST | `/api/stop` | |
+| GET | `/api/status`, `/api/tracks` | |
+| GET | `/api/downloads` | list of downloads |
+| POST | `/api/downloads` | `{ "torrent": "...", "file": "...", "title": "..." }`: download without playing |
+| PATCH | `/api/downloads/:id` | `{ "paused": true }`, `{ "keep": true }` |
+| DELETE | `/api/downloads/:id` | deletes the files |
+| GET | `/api/storage` | free / total / used disk space and cleanup settings |
+| WS | `/ws` | pushes `{ "type": "status", ... }` (≤ 4/s) and `{ "type": "downloads", "items": [...] }` (≤ 1/s) |
+
+Control actions: `play`, `pause`, `toggle`, `seekBy`, `seekTo`, `volume`, `volumeBy`, `audio`, `sub`.

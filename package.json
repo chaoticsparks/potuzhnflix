@@ -8,12 +8,18 @@
     "player:pi": "node player/cli.js --pi",
     "play": "node torrent/cli.js",
     "play:pi": "node torrent/cli.js --pi",
-    "search": "node search/cli.js"
+    "search": "node search/cli.js",
+    "start": "node server/index.js",
+    "start:pi": "node server/index.js --pi"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
+    "@fastify/static": "^10.1.5",
+    "@fastify/websocket": "^11.3.1",
+    "fastify": "^5.12.5",
+    "parse-torrent": "^11.0.24",
     "webtorrent": "^3.0.21"
   }
 }
