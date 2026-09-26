@@ -5,10 +5,12 @@ import { MpvPlayer, PI_ARGS } from '../player/player.js';
 const args = process.argv.slice(2);
 const onPi = args.includes('--pi');
 const serveOnly = args.includes('--serve-only');
-const torrentId = args.find((a) => !a.startsWith('--'));
+const fileIdx = args.indexOf('--file');
+const wantedFile = fileIdx >= 0 ? args[fileIdx + 1] : undefined;
+const torrentId = args.find((a, i) => !a.startsWith('--') && !(fileIdx >= 0 && i === fileIdx + 1));
 
 if (!torrentId) {
-  console.log('Usage: npm run play -- "<magnet link | path to .torrent>" [--pi] [--serve-only]');
+  console.log('Usage: npm run play -- "<magnet | .torrent path or URL>" [--file <path in torrent>] [--pi] [--serve-only]');
   process.exit(1);
 }
 
@@ -18,7 +20,7 @@ const engine = new TorrentEngine();
 engine.on('error', (err) => console.error('\nTorrent error:', err.message));
 
 console.log('Fetching torrent metadata…');
-const info = await engine.open(torrentId);
+const info = await engine.open(torrentId, { file: wantedFile });
 console.log(`Video file: ${info.name} (${mb(info.length)} MB)`);
 
 const url = await engine.serve();

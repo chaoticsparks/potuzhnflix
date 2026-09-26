@@ -65,7 +65,7 @@ Raspberry Pi OS Lite (64-bit), Node.js 18+ (ESM), WebTorrent, mpv, Fastify, WebS
    - Отдаёт статус: процент загрузки, скорость, пиры.
    - Чистит кэш после просмотра или при заполнении диска.
    - Результат этапов 1–2: фильм по magnet-ссылке играет из командной строки.
-3. **Поиск.** Интерфейс провайдера и модули Internet Archive и ручного magnet.
+3. **Поиск.** Интерфейс провайдера и модули Internet Archive и ручного magnet. ✅ POC DONE (`npm run search -- "<title>" [--play n]`, see `search/`)
 4. **Backend.** Fastify.
    - REST: `/search`, `/play`, `/control`, `/stop`.
    - WebSocket со статусом.
@@ -96,13 +96,19 @@ Raspberry Pi OS Lite (64-bit), Node.js 18+ (ESM), WebTorrent, mpv, Fastify, WebS
 tvbox/
   CLAUDE.md
   README.md           # install and run instructions (mpv, Node.js)
-  package.json        # "type": "module", скрипты: npm run player / player:pi / play / play:pi
+  package.json        # "type": "module", скрипты: npm run player / player:pi / play / play:pi / search
   player/
     player.js         # класс MpvPlayer (EventEmitter)
     cli.js            # консольный пульт для ручной проверки
   torrent/
     engine.js         # TorrentEngine: WebTorrent + local HTTP server with Range
-    cli.js            # magnet/.torrent → engine → mpv, prints download status
+    cli.js            # magnet/.torrent [--file <path>] → engine → mpv, prints download status
+  search/
+    index.js          # search(query): runs all providers in parallel, merges results
+    providers/
+      magnet.js       # pasted magnet / info hash / .torrent URL → one result
+      archive.js      # Internet Archive, collection feature_films
+    cli.js            # prints results; --play <n> launches torrent/cli.js
 ```
 
 ### `torrent/engine.js`, class `TorrentEngine` (POC)
@@ -115,6 +121,18 @@ tvbox/
 - `cli.js --serve-only`: serves without starting mpv (handy for testing with curl).
 - Tested on Windows with the Sintel torrent (CC-BY): metadata, file choice, Range and far seeks work. Full playback in mpv not yet checked.
 - npm warns that install scripts for `node-datachannel` / `bufferutil` / `utf-8-validate` were skipped. This is harmless: `node-datachannel` ships a prebuilt binary (WebRTC peers work), and the other two are optional speed-ups for `ws`.
+- `open(torrentId, { file })` plays a specific file (path inside the torrent); without it, the largest video file.
+
+### `search/` (POC)
+
+- Provider: `{ id, name, search(query, { signal }) → Result[] }`. Result: `{provider, id, title, year, quality, size, seeders, torrent, file, url}`; `torrent` + `file` go straight to `TorrentEngine.open()`. Typedef in `search/index.js`.
+- `search()` uses `Promise.allSettled`: a failing provider shows up in `errors`, the others still return results. Timeout 20 s.
+- **Internet Archive:** `advancedsearch.php` (`title:(…) AND mediatype:movies AND collection:feature_films`, top 10 by downloads), then `/metadata/<id>` per item.
+  - One IA item = many versions of the same film in ONE torrent (`<id>_archive.torrent`, with archive.org web seeds). Each quality becomes a separate result pointing at one file.
+  - Quality buckets 1080p/720p/480p/360p/240p (width counts too). Per bucket keep the smallest file; drop a quality if a better one is not larger; drop 240p if anything else exists; skip files < 50 MB.
+  - Films split into parts (`1of5`, `part2`, `cd1`, `reel 3`) are skipped. Would need playlist support.
+  - `seeders` is `null`: IA doesn't report it, and web seeds make it irrelevant.
+- Tested: search results for several titles; end-to-end search → IA torrent → chosen file → HTTP Range (4 peers + web seeds). Playback in mpv not yet checked.
 
 ### `player/player.js`, класс `MpvPlayer`
 

@@ -57,6 +57,16 @@ npm run player:pi     # Raspberry Pi: output straight to HDMI (DRM/KMS)
 
 Then type `load <path or URL>` to play a file, and `help` for the command list.
 
+## Searching
+
+```bash
+npm run search -- "night of the living dead"
+npm run search -- "night of the living dead" --play 1
+```
+
+Searches Internet Archive (public-domain feature films); a pasted magnet link also works.
+`--play <n>` starts playing result number `n`.
+
 ## Playing a torrent
 
 ```bash

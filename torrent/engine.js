@@ -32,8 +32,9 @@ export class TorrentEngine extends EventEmitter {
     this.server = null;
   }
 
-  // Add a magnet link, .torrent path or info hash; resolves once metadata is known
-  async open(torrentId) {
+  // Add a magnet link, .torrent path/URL or info hash; resolves once metadata is known.
+  // `file` picks a file by its path inside the torrent; otherwise the largest video file.
+  async open(torrentId, { file: wanted } = {}) {
     await this.close();
     // Start with nothing selected, so only the chosen video file gets downloaded
     const torrent = this.client.add(torrentId, { path: this.cacheDir, deselect: true });
@@ -44,8 +45,8 @@ export class TorrentEngine extends EventEmitter {
       torrent.once('error', reject);
     });
 
-    const file = pickVideoFile(torrent.files);
-    if (!file) throw new Error('No video file found in torrent');
+    const file = wanted ? findFile(torrent.files, wanted) : pickVideoFile(torrent.files);
+    if (!file) throw new Error(wanted ? `File not found in torrent: ${wanted}` : 'No video file found in torrent');
     file.select();
     this.file = file;
 
@@ -142,6 +143,13 @@ function pickVideoFile(files) {
   return files
     .filter((f) => VIDEO_TYPES[path.extname(f.name).toLowerCase()])
     .sort((a, b) => b.length - a.length)[0];
+}
+
+// Match by path relative to the torrent root; multi-file torrents prefix paths with the torrent name
+function findFile(files, wanted) {
+  const norm = (p) => p.replace(/\\/g, '/');
+  const target = norm(wanted);
+  return files.find((f) => norm(f.path) === target || norm(f.path).endsWith(`/${target}`));
 }
 
 // Single-range "bytes=a-b" / "bytes=a-" / "bytes=-n"; null when absent
