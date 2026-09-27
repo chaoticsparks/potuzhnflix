@@ -25,6 +25,7 @@ const box = new TvBox({
 });
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 box.on('error', (err) => app.log.error(err));
+box.on('mpv-log', (line) => app.log.warn({ mpv: line }, 'mpv'));
 
 await app.register(fastifyWebsocket);
 const WEB_DIST = fileURLToPath(new URL('../web/dist', import.meta.url));

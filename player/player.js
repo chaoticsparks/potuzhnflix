@@ -21,7 +21,18 @@ const OBSERVED = {
 };
 
 // Raspberry Pi: output straight to HDMI, no desktop
-export const PI_ARGS = ['--vo=gpu', '--gpu-context=drm', '--fs'];
+// HDMI straight from DRM/KMS, no desktop. 1080p output even on a 4K TV: the Pi 4 composes 4K slowly,
+// and the films are 1080p anyway — the TV upscales.
+// Hardware decoding: auto-safe never tries the Pi's decoders. drm = H.265 (stateless, needs
+// Raspberry Pi's FFmpeg build; zero-copy into the GPU), v4l2m2m-copy = H.264 (the zero-copy variant
+// dropped frames); mpv takes the first that supports the codec.
+// profile=fast: mpv's default high-quality scaling is too much for the Pi 4 GPU at 1080p (HEVC dropped
+// 70–130 frames per 15 s in every decoder mode); with it, 0 drops at ~18% CPU for H.265 and H.264.
+export const PI_ARGS = [
+  '--vo=gpu', '--gpu-context=drm', '--drm-mode=1920x1080', '--fs',
+  '--profile=fast',
+  '--hwdec=drm,v4l2m2m-copy',
+];
 
 export class MpvPlayer extends EventEmitter {
   constructor({ extraArgs = [], socketPath, mpvPath = 'mpv' } = {}) {
@@ -43,12 +54,23 @@ export class MpvPlayer extends EventEmitter {
     const args = [
       '--idle=yes',          // stay open when nothing is playing
       '--force-window=yes',  // keep the window open
-      '--no-terminal',
+      '--input-terminal=no', // no keyboard input from stdin
+      '--msg-level=all=warn',// only warnings and errors, emitted as 'log' (e.g. "can't get DRM master")
       '--hwdec=auto-safe',   // hardware decoding where possible
       `--input-ipc-server=${this.socketPath}`,
       ...this.extraArgs,
     ];
-    this.proc = spawn(this.mpvPath, args, { stdio: 'ignore' });
+    this.proc = spawn(this.mpvPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    for (const stream of [this.proc.stdout, this.proc.stderr]) {
+      let buf = '';
+      stream.setEncoding('utf8');
+      stream.on('data', (chunk) => {
+        buf += chunk;
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop();
+        for (const line of lines) if (line.trim()) this.emit('log', line.trim());
+      });
+    }
     this.proc.on('error', (err) => {
       this.startError = err;
       if (this.listenerCount('error')) this.emit('error', err);

@@ -78,7 +78,7 @@ Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebS
    - Downloads screen: list with progress / state / expiry, pause/resume, keep, delete, free disk space. Series: episode list with per-episode progress, "continue from episode N".
    - Устанавливается на главный экран телефона.
    - Результат: полностью рабочий пульт с телефона (пока на компьютере).
-6. **Перенос на Pi.** ← NEXT
+6. **Перенос на Pi.** ← IN PROGRESS: runs on the Pi as a service; blue screen, playback (smooth, hardware decoding), HDMI sound, phone remote and temperature confirmed by the user on the real TV. Left: Lexar (not delivered yet) → move downloads there; optional: DHCP reservation, heatsinks, a real 1080p HEVC film.
    - Запись ОС, Wi‑Fi, SSH, монтирование Lexar.
    - mDNS `tvbox.local`.
    - systemd-сервисы с автозапуском и перезапуском при сбое.
@@ -100,6 +100,9 @@ tvbox/
   README.md           # install and run instructions (mpv, Node.js)
   logo.png            # the logo, source for the icons in web/public
   package.json        # "type": "module", скрипты: player / player:pi / play / play:pi / start / start:pi / build / dev:web
+  deploy/
+    setup-pi.sh       # one-time root setup on the Pi (run by the user with sudo; idempotent)
+    potuzhnflix.service  # systemd unit template (@USER@, @DIR@, @CACHE@)
   scripts/
     tv-fonts.mjs      # WOFF → TTF for mpv's OSD (runs in `npm run build`), output player/fonts (git-ignored)
   player/
@@ -144,7 +147,7 @@ tvbox/
 ### `library/library.js`, class `Library`
 
 - An **item** is one torrent (one magnet), played as a **playlist** of the video files `pickVideoFiles` chose: a film (one file), a film in parts, or the episodes of a series. Id = info hash (items from older versions may have `<infoHash>-<n>` ids; lookups by torrent go through `infoHash`). Title = torrent name.
-- Stored in `library.json` (`{version: 2, items}`; v1 items with a single file are migrated on load). Saved within 2 s of a change (the timer is not restarted, so constant progress updates can't starve it), via temp file + rename, writes serialised. BOM tolerated. A corrupt file stops startup on purpose: an empty library would delete every download as an orphan.
+- Stored in `library.json` (`{version: 2, items}`; v1 items with a single file are migrated on load). **Power-cut safe** (the box gets unplugged): new file written to `.tmp`, fsync'ed, the old one renamed to `library.json.bak`, then `.tmp` → `library.json`, then the directory is fsync'ed. Save within 2 s of a real change, within 10 s of mere download progress (SD wear); a pending timer is only brought forward, never restarted. Loading: `library.json` → `.bak` → rebuilt from `torrents/*.torrent` (progress found again when torrents verify their data). Never refuses to start: an empty library would make orphan cleanup erase every download. BOM tolerated.
 - Item: `{id, infoHash, title, files: [{index, name, path, length, downloaded, done}], episode, state: downloading|paused|complete, keep, addedAt, completedAt, lastPlayedAt, lastActivityAt}` (timestamps in ms). `episode` = last played entry of `files`. The item is `complete` when all files are done.
 - API: `load()`, `add(magnet)` (the same torrent again returns the existing item; resolves after metadata), `stream(id, episode?)` → local path if that file is done (mpv plays it directly) or stream URL; episode defaults to the last played; `release(id)`, `pause(id)`, `resume(id)`, `setKeep(id, bool)`, `remove(id)`, `cleanup()`, `list()`, `get(id)`, `storage()`, `close()`. Emits `changed` (on every change and every second while downloading).
 - `view(item)`: `{id, title, length, downloaded, progress, state, waiting, playing, keep, downloadSpeed, peers, episode, files: [{name, length, downloaded, progress, done}], addedAt, completedAt, lastPlayedAt, expiresAt}` (totals are sums over files).
@@ -206,7 +209,8 @@ tvbox/
 ### `player/player.js`, класс `MpvPlayer`
 
 - **Запуск:** `start()` запускает mpv со следующими флагами:
-  - `--idle=yes --force-window=yes --no-terminal --hwdec=auto-safe --input-ipc-server=<сокет>`
+  - `--idle=yes --force-window=yes --input-terminal=no --msg-level=all=warn --hwdec=auto-safe --input-ipc-server=<сокет>`
+  - mpv warnings/errors (stdout/stderr) are emitted as `log` events; `TvBox` → `mpv-log` → the server log. With `--no-terminal` they were lost (the desktop holding DRM went unnoticed).
   - Сокет: `$TMPDIR/tvbox-mpv.sock`, на Windows — `\\.\pipe\tvbox-mpv`.
   - После подключения подписывается на свойства через `observe_property`.
 - **Методы:**
@@ -240,6 +244,24 @@ tvbox/
 - `TvBox` starts mpv in `init()`, so the TV shows the blue screen right after boot; if mpv is missing, the server still starts (error logged). `remoteUrl` = `TVBOX_URL` env or `http://<first LAN IPv4>:<port>`.
 - `TVBOX_MPV_ARGS` env: extra mpv options, e.g. `--geometry=960x540+40+40` for development.
 - Checked on Windows (window captures): idle, loading, start card, seek, resume, pause, volume.
+
+### Raspberry Pi (stage 6)
+
+- Hardware: Pi 4 4 GB, **no heatsinks and no fan yet** (the kit came without them). 42–50 °C idle in the closed official case. Check under load (film + download) before deciding on stick-on heatsinks / the official Case Fan. `vcgencmd get_throttled` was 0x0.
+- OS: the card has **Raspberry Pi OS with desktop** (Debian 13 trixie, 64-bit), switched to console boot: `systemctl set-default multi-user.target` (lightdm/labwc held DRM, so mpv couldn't draw). Reverse: `set-default graphical.target`. Reflash with Lite only if the card is redone anyway.
+- Access: user `chaoticsparks`, host `tvbox` (mDNS `tvbox.local` is flaky from the Windows PC; the IP changes on reboot → the user should add a DHCP reservation, MAC `98:fe:54:34:12:2c`). SSH: key-only, the PC's `~/.ssh/id_ed25519`. When connecting by IP use `-o HostKeyAlias=tvbox.local`.
+- `sudo` needs a password, which Claude never types: root steps go into `deploy/setup-pi.sh` and the user runs `ssh -t chaoticsparks@tvbox.local "sudo bash ~/potuzhnflix/deploy/setup-pi.sh"`. The script installs mpv/nodejs/npm from Debian, the cache dir, the service, disables getty@tty1, and a sudoers rule so the user can `sudo systemctl start|stop|restart potuzhnflix` without a password (used for deploys). Files are written temp + sync + rename: the first run lost them to a power cut right after.
+- Service `potuzhnflix`: `node server/index.js --pi` as the user, port 80 via `CAP_NET_BIND_SERVICE`, `TVBOX_URL=http://tvbox.local`, `TVBOX_CACHE=/home/chaoticsparks/tvbox-cache` (SD card until the Lexar arrives; /tmp is RAM on Debian 13), `Restart=always`. Logs: `journalctl -u potuzhnflix` (user is in `adm`); mpv warnings/errors appear there as `"msg":"mpv"`.
+- Node.js 20.19.2 from Debian. WebTorrent 3 declares `node >=22` (npm EBADENGINE warning) but works on 20 (checked: metadata, peers, download; node-datachannel loads on arm64). If something breaks, install Node 22.
+- Deploy (the GitHub repo is private, the Pi has no credentials): `git archive HEAD | ssh … "tar -x -C ~/potuzhnflix"` (or tar the changed files), then `npm ci` if dependencies changed, `npm run build`, `sudo systemctl restart potuzhnflix`. npm ci takes ~1 min, build ~7 s on the Pi.
+- mpv on the Pi: `PI_ARGS` = `--vo=gpu --gpu-context=drm --drm-mode=1920x1080 --fs --profile=fast --hwdec=drm,v4l2m2m-copy`. The TV is 4K; output 1080p, the TV upscales. mpv 0.40 from Debian, FFmpeg is Raspberry Pi's build (`+rpt`, has the stateless HEVC decoder). HDMI0 = `card1-HDMI-A-1`, sound cards `vc4hdmi0`/`vc4hdmi1`, mpv uses ALSA.
+  - Decoding, measured on the Pi (15 s after warm-up, standalone mpv, no OSD): the default `auto-safe` never tries the Pi's decoders (tried CUDA/Vulkan → software). H.264: `v4l2m2m-copy` works (zero-copy `v4l2m2m` dropped frames). H.265: `drm` (zero-copy) and `drm-copy` work; `v4l2m2m` doesn't do HEVC; `drm` doesn't do H.264, so the list picks per codec.
+  - Without `--profile=fast`, 1080p HEVC dropped 46–134 frames / 15 s in every mode (even software): mpv's default scaling is too heavy for the Pi 4 GPU. With it: 0 drops, H.265 `drm` ~18 % CPU, H.264 `v4l2m2m-copy` ~19 %. `--vo=drm` also gave 0 drops but 180–250 % CPU (scaling on the CPU) — rejected.
+  - In the service (Sintel H.264 via the API): `v4l2m2m-copy`, 0 drops, mpv ~20 % CPU, 56 °C. Temperature without heatsinks: 50 °C idle, 55–56 °C playing, 58–67 °C in software-decoding benchmarks; `throttled=0x0` throughout.
+  - Benchmarks: stop the service (`sudo systemctl stop potuzhnflix`), run a separate mpv with `--input-ipc-server=/tmp/bench.sock` and read `hwdec-current` / `frame-drop-count` over IPC. Kill it by PID, not `pkill -f` (the pattern matches the SSH command itself). HEVC test clip: `ffmpeg -f lavfi -i testsrc2=size=1920x1080:rate=24 -t 30 -c:v libx265 -preset ultrafast`.
+- DRM devices: `card0` = v3d (3D only, no connectors), `card1` = vc4 (HDMI-A-1/2). mpv picks the card with a *connected* connector; many TVs drop HDMI hot-plug in standby, then mpv fails with "No primary DRM device could be picked" and sits without a screen.
+  - Fix: `setup-pi.sh` appends `video=HDMI-A-1:1920x1080@60D` to `/boot/firmware/cmdline.txt` (D = force the output on); needs a reboot.
+  - Safety net in `TvBox`: mpv logging "Error opening/initializing the VO window" → quit and restart it every 30 s (`DISPLAY_RETRY_MS`) until the screen is there (checked on the Pi with the TV off).
 
 ## Договорённости
 

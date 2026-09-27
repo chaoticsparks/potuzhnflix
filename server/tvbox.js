@@ -4,6 +4,8 @@ import { MpvPlayer } from '../player/player.js';
 import { TvScreen, TV_ARGS } from '../player/tvscreen.js';
 import { Library, httpError } from '../library/library.js';
 
+const DISPLAY_RETRY_MS = 30 * 1000;
+
 // Control actions accepted by control(); value is validated per action
 const ACTIONS = {
   play: (p) => p.play(),
@@ -142,6 +144,8 @@ export class TvBox extends EventEmitter {
   }
 
   async shutdown() {
+    this.closing = true;
+    clearTimeout(this.displayRetry);
     this.session++;
     await this.player?.quit();
     await this.library.close();
@@ -161,6 +165,10 @@ export class TvBox extends EventEmitter {
     const tv = new TvScreen(player, { remoteUrl: this.remoteUrl });
     player.on('state', () => this.#changed());
     player.on('end-file', (e) => this.#onEndFile(e));
+    player.on('log', (line) => {
+      this.emit('mpv-log', line);
+      if (/Error opening\/initializing the VO window/.test(line)) this.#retryDisplay(player);
+    });
     player.on('exit', () => {
       tv.stop();
       if (this.player === player) {
@@ -175,6 +183,28 @@ export class TvBox extends EventEmitter {
     tv.start();
     this.#updateTv();
     return player;
+  }
+
+  // mpv started without a screen (e.g. the TV was off and dropped HDMI hot-plug) and would sit
+  // there blind; restart it until the screen is back. The kernel's video=…D setting on the Pi
+  // normally prevents this.
+  #retryDisplay(player) {
+    if (this.displayRetry || this.closing) return;
+    this.emit('error', new Error(`mpv has no screen; retrying in ${DISPLAY_RETRY_MS / 1000} s`));
+    this.displayRetry = setTimeout(async () => {
+      this.displayRetry = null;
+      if (this.closing || this.player !== player) return;
+      await new Promise((resolve) => {
+        player.once('exit', resolve);
+        player.quit();
+        setTimeout(() => player.proc?.kill(), 3000);   // didn't take the hint
+      });
+      try {
+        await this.#ensurePlayer();
+      } catch (err) {
+        this.emit('error', err);
+      }
+    }, DISPLAY_RETRY_MS);
   }
 
   // Next / previous entry of the playlist

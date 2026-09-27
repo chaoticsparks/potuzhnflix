@@ -6,6 +6,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import parseTorrent from 'parse-torrent';
 import { TorrentEngine, DEFAULT_CACHE_DIR, pickVideoFiles } from '../torrent/engine.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -36,19 +37,7 @@ export class Library extends EventEmitter {
 
   async load() {
     await fs.mkdir(this.dir, { recursive: true });
-    const json = await fs.readFile(this.file, 'utf8').catch((err) => {
-      if (err.code === 'ENOENT') return null;
-      throw err;
-    });
-    let saved = [];
-    try {
-      // Strip a BOM (Windows editors add one)
-      if (json) saved = JSON.parse(json.replace(/^﻿/, '')).items;
-    } catch (err) {
-      // Refuse to start: with an empty library every download would be deleted as an orphan
-      throw new Error(`${this.file} is corrupt (${err.message}). Fix or delete it.`);
-    }
-    for (const item of saved) this.items.set(item.id, migrate(item));
+    for (const item of await this.#readSaved()) this.items.set(item.id, migrate(item));
 
     await this.#deleteOrphans();
     await this.cleanup();
@@ -352,7 +341,7 @@ export class Library extends EventEmitter {
         changed = true;
       }
     }
-    if (changed) this.#changed();
+    if (changed) this.#changed(false);
   }
 
   // Frees space for `needed` more bytes plus what active downloads still have to fetch
@@ -388,24 +377,106 @@ export class Library extends EventEmitter {
     }
   }
 
-  // Saves within 2 s of a change. A pending timer is not restarted: progress changes every
-  // second while downloading, and a restarting timer would never fire.
-  #changed() {
-    this.saveTimer ??= setTimeout(() => this.#save().catch((err) => this.emit('error', err)), 2000);
+  // Saves within 2 s of a real change, within 10 s of mere download progress (spares the SD card).
+  // A pending timer is only ever brought forward: progress changes every second while downloading,
+  // and a timer restarted on each change would never fire.
+  #changed(urgent = true) {
+    const due = Date.now() + (urgent ? 2000 : 10000);
+    if (!this.saveTimer || due < this.saveDue) {
+      clearTimeout(this.saveTimer);
+      this.saveDue = due;
+      this.saveTimer = setTimeout(() => this.#save().catch((err) => this.emit('error', err)), due - Date.now());
+    }
     this.emit('changed');
   }
 
-  // Write to a temp file and rename, so a crash never leaves a half-written library.json.
-  // Serialised: two writes must not share the temp file.
+  // Survives power cuts (the box gets unplugged): the new file is fsync'ed before it replaces the
+  // old one, and the previous version stays as library.json.bak. Serialised: one temp file.
   #save() {
     clearTimeout(this.saveTimer);
     this.saveTimer = null;
     this.saving = (this.saving ?? Promise.resolve()).catch(() => {}).then(async () => {
       const tmp = `${this.file}.tmp`;
-      await fs.writeFile(tmp, JSON.stringify({ version: 2, items: [...this.items.values()] }, null, 2));
+      const fh = await fs.open(tmp, 'w');
+      try {
+        await fh.writeFile(JSON.stringify({ version: 2, items: [...this.items.values()] }, null, 2));
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+      await fs.rename(this.file, `${this.file}.bak`).catch((err) => {
+        if (err.code !== 'ENOENT') throw err;
+      });
       await fs.rename(tmp, this.file);
+      await syncDir(this.dir);
     });
     return this.saving;
+  }
+
+  // library.json → library.json.bak → rebuilt from the saved .torrent files. Never gives up:
+  // an empty library would make #deleteOrphans() erase every download.
+  async #readSaved() {
+    for (const file of [this.file, `${this.file}.bak`]) {
+      const json = await fs.readFile(file, 'utf8').catch(() => null);
+      if (!json) continue;   // missing, or emptied by a power cut
+      try {
+        const { items } = JSON.parse(json.replace(/^﻿/, ''));   // BOM: Windows editors add one
+        if (Array.isArray(items)) {
+          if (file !== this.file) this.emit('error', new Error(`${this.file} was damaged; loaded the backup`));
+          return items;
+        }
+      } catch {
+        // try the next one
+      }
+    }
+    const rebuilt = await this.#rebuildFromTorrents();
+    if (rebuilt.length) {
+      this.emit('error', new Error(`${this.file} was damaged; rebuilt ${rebuilt.length} download(s) from saved torrents`));
+    }
+    return rebuilt;
+  }
+
+  // Every download keeps its metadata in torrents/<infoHash>.torrent; progress is found again
+  // when the torrent loads and checks the data on disk
+  async #rebuildFromTorrents() {
+    const names = await fs.readdir(this.engine.torrentsDir).catch(() => []);
+    const items = [];
+    for (const name of names.filter((n) => n.endsWith('.torrent'))) {
+      try {
+        const t = await parseTorrent(await fs.readFile(path.join(this.engine.torrentsDir, name)));
+        const chosen = pickVideoFiles(t.files);
+        if (!chosen.length) continue;
+        const now = Date.now();
+        items.push({
+          id: t.infoHash,
+          infoHash: t.infoHash,
+          title: t.name,
+          files: chosen.map((f) => ({
+            index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false,
+          })),
+          episode: 0,
+          state: 'downloading',
+          keep: false,
+          addedAt: now,
+          completedAt: null,
+          lastPlayedAt: null,
+          lastActivityAt: now,
+        });
+      } catch {
+        // unreadable metadata: its data folder is removed as an orphan
+      }
+    }
+    return items;
+  }
+}
+
+// Makes a rename durable (Linux); directories can't be opened for sync on Windows
+async function syncDir(dir) {
+  try {
+    const fh = await fs.open(dir, 'r');
+    try { await fh.sync(); } finally { await fh.close(); }
+  } catch {
+    // not supported here
   }
 }
 
