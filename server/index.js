@@ -26,29 +26,17 @@ app.setErrorHandler((err, req, reply) => {
   reply.code(code).send({ error: err.message });
 });
 
-const torrentBody = {
-  type: 'object',
-  properties: {
-    torrent: { type: 'string', minLength: 1 },
-    file: { type: 'string' },
-    files: { type: 'array', items: { type: 'string' }, minItems: 1 },   // playlist, in play order
-    title: { type: 'string' },
-  },
-};
+const magnet = { type: 'string', pattern: '^magnet:\\?' };
 
-// --- Search & playback ---
+// --- Playback ---
 
-app.get('/api/search', {
-  schema: { querystring: { type: 'object', required: ['q'], properties: { q: { type: 'string' } } } },
-}, (req) => box.search(req.query.q));
-
-// Body: { id, episode? } to play from the library, or { torrent, file?, files?, title? } for a new one.
-// Without file/files, a torrent with several videos (series) becomes a playlist.
+// Body: { id, episode? } to play from the library, or { magnet } for a new one.
+// A torrent with several videos (series) becomes a playlist.
 app.post('/api/play', {
   schema: {
     body: {
-      ...torrentBody,
-      properties: { ...torrentBody.properties, id: { type: 'string' }, episode: { type: 'integer', minimum: 0 } },
+      type: 'object',
+      properties: { magnet, id: { type: 'string' }, episode: { type: 'integer', minimum: 0 } },
     },
   },
 }, async (req) => {
@@ -78,7 +66,7 @@ app.get('/api/tracks', () => box.tracks());
 app.get('/api/downloads', () => box.library.list());
 
 app.post('/api/downloads', {
-  schema: { body: { ...torrentBody, required: ['torrent'] } },
+  schema: { body: { type: 'object', required: ['magnet'], properties: { magnet } } },
 }, async (req, reply) => {
   reply.code(201);
   return box.download(req.body);

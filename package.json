@@ -8,7 +8,6 @@
     "player:pi": "node player/cli.js --pi",
     "play": "node torrent/cli.js",
     "play:pi": "node torrent/cli.js --pi",
-    "search": "node search/cli.js",
     "start": "node server/index.js",
     "start:pi": "node server/index.js --pi"
   },

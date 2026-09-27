@@ -1,8 +1,7 @@
-// tvbox.js — ties search → download library → mpv together; one playback at a time
+// tvbox.js — ties the download library and mpv together; one playback at a time
 import { EventEmitter } from 'node:events';
 import { MpvPlayer } from '../player/player.js';
 import { Library, httpError } from '../library/library.js';
-import { search } from '../search/index.js';
 
 // Control actions accepted by control(); value is validated per action
 const ACTIONS = {
@@ -39,27 +38,23 @@ export class TvBox extends EventEmitter {
     return this.library.load();
   }
 
-  search(query) {
-    return search(query);
-  }
-
   // Download without playing
-  download({ torrent, file, files, title }) {
-    return this.library.add({ torrent, file, files, title });
+  download({ magnet }) {
+    return this.library.add(magnet);
   }
 
-  // Plays a library item ({ id, episode? }) or a new torrent ({ torrent, file?, files?, title? },
-  // added to the library). `episode` defaults to the last one watched.
+  // Plays a library item ({ id, episode? }) or a new magnet link ({ magnet }, added to the library).
+  // `episode` defaults to the last one watched.
   // Resolves when mpv has started loading; the long part is torrent metadata.
-  async play({ id, episode, torrent, file, files, title }) {
-    if (!id && !torrent) throw httpError(400, 'id or torrent is required');
+  async play({ id, episode, magnet }) {
+    if (!id && !magnet) throw httpError(400, 'id or magnet is required');
     const session = ++this.session;
     // Switching episodes of the same item keeps it marked as playing (no download reshuffle)
     if (!id || id !== this.current) await this.#release();
-    this.#set({ phase: 'loading', title: title ?? this.library.get(id)?.title ?? null, error: null });
+    this.#set({ phase: 'loading', title: id ? this.library.get(id)?.title ?? null : null, error: null });
 
     try {
-      const item = id ? this.library.get(id) : await this.library.add({ torrent, file, files, title });
+      const item = id ? this.library.get(id) : await this.library.add(magnet);
       if (!item) throw httpError(404, `No such download: ${id}`);
       if (session !== this.session) return;
       const source = await this.library.stream(item.id, episode);

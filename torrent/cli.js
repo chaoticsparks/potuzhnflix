@@ -1,4 +1,4 @@
-// cli.js — play a magnet link / .torrent on mpv from the terminal, through the download library.
+// cli.js — play a magnet link on mpv from the terminal, through the download library.
 // A torrent with several videos (series) plays as a playlist: the next episode starts automatically.
 import { Library } from '../library/library.js';
 import { MpvPlayer, PI_ARGS } from '../player/player.js';
@@ -6,17 +6,12 @@ import { MpvPlayer, PI_ARGS } from '../player/player.js';
 const args = process.argv.slice(2);
 const onPi = args.includes('--pi');
 const serveOnly = args.includes('--serve-only');
-const valueOf = new Set();   // indexes of option values
-const files = [];
-let episode;
-args.forEach((a, i) => {
-  if (a === '--file') { files.push(args[i + 1]); valueOf.add(i + 1); }
-  if (a === '--episode') { episode = Number(args[i + 1]) - 1; valueOf.add(i + 1); }
-});
-const torrentId = args.find((a, i) => !a.startsWith('--') && !valueOf.has(i));
+const epIdx = args.indexOf('--episode');
+const episode = epIdx >= 0 ? Number(args[epIdx + 1]) - 1 : undefined;
+const magnet = args.find((a) => a.startsWith('magnet:'));
 
-if (!torrentId) {
-  console.log('Usage: npm run play -- "<magnet | .torrent path or URL>" [--file <path in torrent>]... [--episode <n>] [--pi] [--serve-only]');
+if (!magnet) {
+  console.log('Usage: npm run play -- "<magnet link>" [--episode <n>] [--pi] [--serve-only]');
   process.exit(1);
 }
 
@@ -27,7 +22,7 @@ library.on('error', (err) => console.error('\nError:', err.message));
 await library.load();
 
 console.log('Fetching torrent metadata…');
-const item = await library.add({ torrent: torrentId, files });
+const item = await library.add(magnet);
 if (item.files.length > 1) {
   console.log(`Playlist: ${item.title}`);
   item.files.forEach((f, i) => console.log(`  ${String(i + 1).padStart(2)}. ${f.name} (${mb(f.length)} MB)`));

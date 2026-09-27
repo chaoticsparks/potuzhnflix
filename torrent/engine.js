@@ -27,7 +27,7 @@ export const VIDEO_TYPES = {
 
 const METADATA_TIMEOUT_MS = 90 * 1000;
 
-export const DEFAULT_CACHE_DIR =process.env.TVBOX_CACHE ?? path.join(os.tmpdir(), 'tvbox-cache');
+export const DEFAULT_CACHE_DIR = process.env.TVBOX_CACHE ?? path.join(os.tmpdir(), 'tvbox-cache');
 
 export class TorrentEngine extends EventEmitter {
   constructor({ dir = DEFAULT_CACHE_DIR } = {}) {
@@ -41,9 +41,9 @@ export class TorrentEngine extends EventEmitter {
     this.server = null;
   }
 
-  // Magnet, info hash, .torrent URL / path or Buffer → ready Torrent (reuses a loaded one)
-  async add(source) {
-    const { id, infoHash } = await this.#resolve(source);
+  // Magnet link or info hash → ready Torrent (reuses a loaded one)
+  async add(magnetOrHash) {
+    const { id, infoHash } = await this.#resolve(magnetOrHash);
     const loaded = this.get(infoHash);
     if (loaded) return loaded;
     if (!this.adding.has(infoHash)) {
@@ -121,20 +121,16 @@ export class TorrentEngine extends EventEmitter {
     await new Promise((resolve) => this.client.destroy(resolve));
   }
 
-  async #resolve(source) {
-    let id = source;
-    if (typeof source === 'string' && /^https?:\/\//i.test(source)) {
-      const res = await fetch(source, { signal: AbortSignal.timeout(30000) });
-      if (!res.ok) throw new Error(`Could not download .torrent: HTTP ${res.status}`);
-      id = Buffer.from(await res.arrayBuffer());
-    } else if (typeof source === 'string' && !/^magnet:/i.test(source) && !/^[a-f0-9]{40}$|^[a-z2-7]{32}$/i.test(source)) {
-      id = await fs.readFile(source);
+  async #resolve(magnetOrHash) {
+    let infoHash;
+    try {
+      ({ infoHash } = await parseTorrent(magnetOrHash));
+    } catch {
+      throw Object.assign(new Error('Not a valid magnet link'), { statusCode: 400 });
     }
-    const { infoHash } = await parseTorrent(id);
-
     // Prefer saved metadata: works offline and skips the magnet metadata wait
     const saved = await fs.readFile(path.join(this.torrentsDir, `${infoHash}.torrent`)).catch(() => null);
-    return { id: saved ?? id, infoHash };
+    return { id: saved ?? magnetOrHash, infoHash };
   }
 
   async #add(id, infoHash) {
@@ -216,7 +212,7 @@ const naturalOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 
 
 // The videos to play, in order: one film, a film split into parts, or the episodes of a series.
 // Skips samples/extras, files under 5 % of the largest one, and duplicate formats of the same
-// video (Internet Archive torrents hold "ep1.mp4" + "ep1.ogv" + "ep1_512kb.mp4": best format, then largest, wins).
+// video (e.g. "ep1.mp4" + "ep1.ogv" + "ep1_512kb.mp4": best format, then largest, wins).
 export function pickVideoFiles(files) {
   const videos = files.filter((f) =>
     VIDEO_TYPES[path.extname(f.name).toLowerCase()] && !NOT_MAIN.test(f.path.replace(/\\/g, '/')));
@@ -233,13 +229,6 @@ export function pickVideoFiles(files) {
     if (better) byStem.set(stem, f);
   }
   return [...byStem.values()].sort((a, b) => naturalOrder(a.path, b.path));
-}
-
-// Match by path relative to the torrent root; multi-file torrents prefix paths with the torrent name
-export function findFile(files, wanted) {
-  const norm = (p) => p.replace(/\\/g, '/');
-  const target = norm(wanted);
-  return files.find((f) => norm(f.path) === target || norm(f.path).endsWith(`/${target}`));
 }
 
 // Single-range "bytes=a-b" / "bytes=a-" / "bytes=-n"; null when absent

@@ -1,14 +1,12 @@
 // library.js — downloads that survive restarts: add, pause/resume, delete, keep, auto-cleanup
 //
-// An item is a playlist of video files inside one torrent: a film (one file), a film split
-// into parts, or the episodes of a series. Several items may share a torrent (e.g. 1080p and
-// 480p versions from the same Internet Archive item).
+// An item is one torrent (added by magnet link), played as a playlist of its video files:
+// a film (one file), a film split into parts, or the episodes of a series.
 // While something plays, all other downloads wait so the stream gets the bandwidth.
-import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { TorrentEngine, DEFAULT_CACHE_DIR, pickVideoFiles, findFile } from '../torrent/engine.js';
+import { TorrentEngine, DEFAULT_CACHE_DIR, pickVideoFiles } from '../torrent/engine.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const GB = 1024 ** 3;
@@ -62,41 +60,37 @@ export class Library extends EventEmitter {
   }
 
   // Starts (or reuses) a download; resolves once torrent metadata is known.
-  // `files` (paths, in play order) or `file` pick what to download; otherwise pickVideoFiles() decides.
-  async add(request) {
+  // The videos to play are chosen by pickVideoFiles().
+  async add(magnet) {
     const claim = { infoHash: null };   // keeps #doSync from stopping the torrent before the item exists
     this.claims.add(claim);
     try {
-      return await this.#add(request, claim);
+      return await this.#add(magnet, claim);
     } finally {
       this.claims.delete(claim);
       this.#sync();   // drops the torrent again if the add failed and nothing else needs it
     }
   }
 
-  async #add({ torrent, file, files, title }, claim) {
-    const t = await this.engine.add(torrent);
+  async #add(magnet, claim) {
+    const t = await this.engine.add(magnet);
     claim.infoHash = t.infoHash;
 
-    const wanted = files?.length ? files : file ? [file] : null;
-    const chosen = wanted
-      ? wanted.map((p) => findFile(t.files, p) ?? notFound(p))
-      : pickVideoFiles(t.files);
+    const chosen = pickVideoFiles(t.files);
     if (!chosen.length) throw httpError(404, 'No video file found in torrent');
-
-    const indexes = chosen.map((f) => t.files.indexOf(f));
-    const id = itemId(t.infoHash, indexes);
+    const id = t.infoHash;
     const now = Date.now();
 
-    let item = this.items.get(id);
+    // Items from older versions may have a different id format
+    let item = [...this.items.values()].find((i) => i.infoHash === t.infoHash);
     if (!item) {
       await this.#ensureSpace(sum(chosen, 'length'), id);
       item = {
         id,
         infoHash: t.infoHash,
-        title: title || (chosen.length > 1 ? t.name : chosen[0].name),
-        files: chosen.map((f, i) => ({
-          index: indexes[i], name: f.name, path: f.path, length: f.length, downloaded: 0, done: false,
+        title: t.name,
+        files: chosen.map((f) => ({
+          index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false,
         })),
         episode: 0,             // last played entry of `files`
         state: 'downloading',   // downloading | paused | complete
@@ -196,18 +190,7 @@ export class Library extends EventEmitter {
     if (this.playing?.id === id) throw httpError(409, 'Stop playback before deleting this film');
     this.items.delete(id);
     await this.#sync();
-
-    const siblings = [...this.items.values()].filter((i) => i.infoHash === item.infoHash);
-    if (siblings.length) {
-      // Other items use this torrent: delete only files that none of them needs
-      const used = new Set(siblings.flatMap((i) => i.files.map((f) => f.index)));
-      for (const f of item.files) {
-        if (used.has(f.index)) continue;
-        await fs.rm(this.engine.filePath(item.infoHash, f.path), { force: true, maxRetries: 5 }).catch(() => {});
-      }
-    } else {
-      await this.engine.deleteTorrentData(item.infoHash);
-    }
+    await this.engine.deleteTorrentData(item.infoHash);
     this.#changed();
   }
 
@@ -293,24 +276,18 @@ export class Library extends EventEmitter {
     return item;
   }
 
-  // A torrent file finished; it may belong to several items
   #onFileDone(infoHash, index) {
+    const item = [...this.items.values()].find((i) => i.infoHash === infoHash);
+    const f = item?.files.find((x) => x.index === index);
+    if (!f || f.done) return;
     const now = Date.now();
-    let changed = false;
-    for (const item of this.items.values()) {
-      if (item.infoHash !== infoHash) continue;
-      const f = item.files.find((x) => x.index === index);
-      if (!f || f.done) continue;
-      f.done = true;
-      f.downloaded = f.length;
-      item.lastActivityAt = now;
-      if (item.files.every((x) => x.done)) {
-        item.state = 'complete';
-        item.completedAt = now;
-      }
-      changed = true;
+    f.done = true;
+    f.downloaded = f.length;
+    item.lastActivityAt = now;
+    if (item.files.every((x) => x.done)) {
+      item.state = 'complete';
+      item.completedAt = now;
     }
-    if (!changed) return;
     this.#sync();   // stops the torrent unless something still needs it
     this.#changed();
   }
@@ -432,13 +409,6 @@ export class Library extends EventEmitter {
   }
 }
 
-// Single file: "<infoHash>-<index>"; playlist: "<infoHash>-p<hash of the indexes>"
-function itemId(infoHash, indexes) {
-  if (indexes.length === 1) return `${infoHash}-${indexes[0]}`;
-  const h = crypto.createHash('sha1').update(indexes.join(',')).digest('hex').slice(0, 8);
-  return `${infoHash}-p${h}`;
-}
-
 // v1 items held a single file in flat fields
 function migrate(item) {
   if (item.files) return item;
@@ -466,10 +436,6 @@ async function diskSpace(dir) {
 
 function fmtGB(bytes) {
   return `${(bytes / GB).toFixed(1)} GB`;
-}
-
-function notFound(p) {
-  throw httpError(404, `File not found in torrent: ${p}`);
 }
 
 // Errors with a status code the HTTP layer can pass through

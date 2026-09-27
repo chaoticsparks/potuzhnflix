@@ -57,27 +57,22 @@ npm run player:pi     # Raspberry Pi: output straight to HDMI (DRM/KMS)
 
 Then type `load <path or URL>` to play a file, and `help` for the command list.
 
-## Searching
+## Playing a magnet link
+
+The box works with magnet links only: there is no search.
 
 ```bash
-npm run search -- "night of the living dead"
-npm run search -- "night of the living dead" --play 1
-```
-
-Searches Internet Archive (public-domain feature films); a pasted magnet link also works.
-`--play <n>` starts playing result number `n`.
-
-## Playing a torrent
-
-```bash
-npm run play -- "<magnet link or path to .torrent>"
+npm run play -- "<magnet link>"
+npm run play -- "<magnet link>" --episode 3
 ```
 
 The torrent is added to the download library and played in mpv while it downloads. A torrent
 with several videos (a series, or a film split into parts) plays as a playlist: episodes in
-order, the next one starts automatically. `--episode <n>` starts from episode `n`; `--file`
-(repeatable) picks files yourself. Add `--serve-only` to skip mpv and only print the
-local stream URL.
+order, the next one starts automatically. `--episode <n>` starts from episode `n`. Add
+`--serve-only` to skip mpv and only print the local stream URL.
+
+The magnet needs living peers: the torrent's metadata comes from them. If none answer within
+90 seconds, you get "no peers found".
 
 Example with a legal test torrent ([Sintel](https://durian.blender.org/), CC-BY):
 
@@ -87,14 +82,13 @@ npm run play -- "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn
 
 ## Series
 
-A series is a torrent with several episodes. Paste its magnet link (or .torrent link) the same
-way as a film; search only finds films. The box plays the episodes in order and remembers where
-you stopped: playing the series again continues from the last episode.
+A series is a torrent with several episodes; paste its magnet link the same way as a film.
+The box plays the episodes in order and remembers where you stopped: playing the series again
+continues from the last episode.
 
 - Episodes are sorted naturally (`E2` before `E10`); samples, trailers and extras are skipped.
 - While you watch an episode, the next one downloads too, so it starts right away.
 - `next` / `prev` control actions switch episodes.
-
 ## Downloads
 
 Everything played or downloaded goes into the download library, stored in `$TMPDIR/tvbox-cache`
@@ -123,13 +117,12 @@ address to open on your phone. The remote UI arrives in the next stage; until th
 
 | Method | Path | Body / query |
 | --- | --- | --- |
-| GET | `/api/search` | `?q=<title or magnet>` |
-| POST | `/api/play` | `{ "torrent": "...", "file": "...", "title": "..." }` (fields from a search result, or just `torrent` for a magnet) or `{ "id": "...", "episode": 0 }` (from the library; `episode` optional) |
+| POST | `/api/play` | `{ "magnet": "magnet:?..." }` or `{ "id": "...", "episode": 0 }` (from the library; `episode` optional) |
 | POST | `/api/control` | `{ "action": "pause" }`, `{ "action": "seekBy", "value": 10 }`, … |
 | POST | `/api/stop` | |
 | GET | `/api/status`, `/api/tracks` | |
 | GET | `/api/downloads` | list of downloads |
-| POST | `/api/downloads` | `{ "torrent": "...", "file": "...", "title": "..." }`: download without playing |
+| POST | `/api/downloads` | `{ "magnet": "magnet:?..." }`: download without playing |
 | PATCH | `/api/downloads/:id` | `{ "paused": true }`, `{ "keep": true }` |
 | DELETE | `/api/downloads/:id` | deletes the files |
 | GET | `/api/storage` | free / total / used disk space and cleanup settings |
