@@ -122,11 +122,20 @@ export class MpvPlayer extends EventEmitter {
   }
 
   command(...args) {
+    return this.#send(args);
+  }
+
+  // Command with named arguments, e.g. { name: 'osd-overlay', id: 1, format: 'ass-events', data }
+  commandNamed(args) {
+    return this.#send(args);
+  }
+
+  #send(command) {
     if (!this.socket || this.socket.destroyed) return Promise.reject(new Error('mpv не запущен'));
     const id = ++this.reqId;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.socket.write(JSON.stringify({ command: args, request_id: id }) + '\n');
+      this.socket.write(JSON.stringify({ command, request_id: id }) + '\n');
     });
   }
 
@@ -136,6 +145,8 @@ export class MpvPlayer extends EventEmitter {
   // --- Playback control ---
   async load(url, { title } = {}) {
     await this.setProperty('force-media-title', title ?? '');
+    // mpv keeps `pause` across files: a film paused before Stop would make the next one start paused
+    await this.setProperty('pause', false);
     return this.command('loadfile', url, 'replace');
   }
   play() { return this.setProperty('pause', false); }

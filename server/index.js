@@ -13,7 +13,16 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 const STATUS_INTERVAL_MS = 250;      // mpv reports time-pos many times a second; phones get ≤ 4 updates/s
 const DOWNLOADS_INTERVAL_MS = 1000;
 
-const box = new TvBox({ playerArgs: process.argv.includes('--pi') ? PI_ARGS : [] });
+// Shown on the TV's idle screen; on the Pi this will be http://tvbox.local (set TVBOX_URL)
+const REMOTE_URL = process.env.TVBOX_URL ?? `http://${lanAddresses()[0] ?? 'localhost'}:${PORT}`;
+
+// Extra mpv options, space-separated, e.g. TVBOX_MPV_ARGS="--geometry=960x540+40+40"
+const EXTRA_MPV_ARGS = (process.env.TVBOX_MPV_ARGS ?? '').split(/\s+/).filter(Boolean);
+
+const box = new TvBox({
+  playerArgs: [...(process.argv.includes('--pi') ? PI_ARGS : []), ...EXTRA_MPV_ARGS],
+  remoteUrl: REMOTE_URL,
+});
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 box.on('error', (err) => app.log.error(err));
 

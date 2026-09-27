@@ -118,6 +118,17 @@ npm run start:pi # Raspberry Pi: mpv outputs straight to HDMI
 Listens on port 8080 on all interfaces (override with `PORT` / `HOST`) and prints the LAN
 address to open on your phone.
 
+## The TV picture
+
+When nothing plays, the TV shows an old-VCR blue screen: "ВСТАВТЕ КАСЕТУ", a clock and the
+address of the phone remote. While a film loads it shows "ЗАВАНТАЖУЮ КАСЕТУ..."; during the film,
+VCR-style messages: ▶ PLAY, ❚❚ PAUSE with the tape counter, ▶▶ / ◀◀ after seeking, a green
+volume bar. It is all drawn by mpv's on-screen display, so it works on the Pi without a desktop.
+
+- `TVBOX_URL` changes the address shown (default: `http://<computer's IP>:8080`).
+- `TVBOX_MPV_ARGS` passes extra mpv options, e.g. `TVBOX_MPV_ARGS="--geometry=960x540"` for a
+  smaller window while developing.
+
 ## Phone remote
 
 Open the address the backend prints (e.g. `http://192.168.1.20:8080`) on your phone, in the same

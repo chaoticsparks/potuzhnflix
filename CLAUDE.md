@@ -58,7 +58,7 @@ Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebS
 1. **Плеер (mpv).** ✅ ГОТОВО
    - Управление через IPC: пауза, громкость, перемотка, дорожки, стоп.
    - Состояние (позиция, длительность, громкость, буферизация) обновляется в реальном времени.
-   - Ещё не сделано: экран ожидания (заставка на ТВ).
+   - Экран ожидания на ТВ: ✅ VHS-style blue screen + VCR OSD (see `player/tvscreen.js`).
 2. **Торрент-движок.** ✅ POC DONE (`npm run play -- "<magnet>"`, see `torrent/`, `library/`)
    - Принимает magnet-ссылку, сам выбирает, что играть: фильм, фильм из частей или серии сериала (плейлист).
    - Качает последовательно, при перемотке меняет приоритет кусков.
@@ -100,8 +100,11 @@ tvbox/
   README.md           # install and run instructions (mpv, Node.js)
   logo.png            # the logo, source for the icons in web/public
   package.json        # "type": "module", скрипты: player / player:pi / play / play:pi / start / start:pi / build / dev:web
+  scripts/
+    tv-fonts.mjs      # WOFF → TTF for mpv's OSD (runs in `npm run build`), output player/fonts (git-ignored)
   player/
     player.js         # класс MpvPlayer (EventEmitter)
+    tvscreen.js       # TvScreen: the TV picture around the film (blue screen, VCR OSD), ASS via osd-overlay
     cli.js            # консольный пульт для ручной проверки
   torrent/
     engine.js         # TorrentEngine: many torrents in one WebTorrent client, per-file selection, HTTP streaming
@@ -213,7 +216,8 @@ tvbox/
   - `stop()`
   - `tracks()` возвращает `{audio, subtitles}`; `setAudioTrack(id)`, `setSubtitleTrack(id|null)`
   - `quit()`
-  - Низкоуровневые: `command(...args)`, `getProperty()`, `setProperty()`
+  - Низкоуровневые: `command(...args)`, `commandNamed({name, ...})` (named-argument commands like `osd-overlay`), `getProperty()`, `setProperty()`
+  - `load()` also sets `pause=false`: mpv keeps `pause` across files, so a film paused before Stop made the next one start paused.
 - **Состояние:** `player.state = {paused, position, duration, volume, idle, title, buffering}`.
 - **События:**
   - `state` при каждом изменении отслеживаемого свойства;
@@ -221,6 +225,21 @@ tvbox/
   - `exit` при закрытии mpv.
 - **`PI_ARGS = ['--vo=gpu', '--gpu-context=drm', '--fs']`:** настройки для Pi, будем уточнять на этапе 6.
 - **Статус проверки:** работает с реальным mpv на Windows (через backend); на Pi ещё не проверялся.
+
+### `player/tvscreen.js`, class `TvScreen`: the TV picture (old VHS TV)
+
+- mpv is the only thing that draws on the TV (no browser/desktop on the Pi), so everything is ASS markup sent with mpv's `osd-overlay` command. Layer 1 = background (flat VCR blue `#1739c4` + faint CRT scanlines), layer 2 = content. A 15 fps ticker composes both and sends only when the string changed (idle: ~2 sends/s for the blinking cursor/clock).
+- `TV_ARGS` (added by `TvBox`): `--osc=no` (no mpv controller / idle logo), `--osd-level=0` (no mpv messages; `osd-overlay` still renders), `--osd-fonts-dir=player/fonts`. Font: Press Start 2P (VCR blocky, Cyrillic), converted from @fontsource WOFF by `scripts/tv-fonts.mjs`. Cyrillic and Latin subsets are separate files of one family; libass takes each glyph from whichever file has it (checked).
+- Canvas: height 1080, width follows `osd-dimensions` (polled every 3 s). Margin 100 px for overscan. All text uppercase, white with black outline and a dark-blue shadow.
+- Scenes (`setScene(scene, {title, error, episode})`, driven by `TvBox` phases):
+  - `idle`: blue screen, "■ STOP" top left, clock with blinking colon top right, "ВСТАВТЕ КАСЕТУ_" centre, "Пульт на телефоні: <remoteUrl>" below. Everything drifts a few pixels slowly (burn-in protection).
+  - `loading`: blue, "▶ PLAY", "ЗАВАНТАЖУЮ КАСЕТУ..." (text only, like a real VCR), title and episode.
+  - Blinking "_", counting "...", the clock's ":": the whole line is always laid out at full length and the "off" characters are drawn transparent (`text()` tail argument). libass drops trailing spaces, so padding with spaces made centred text jump.
+  - `error`: blue, "■ STOP", "КАСЕТУ НЕ ПРОЧИТАНО_", error text wrapped (≤ 3 lines).
+  - `playing`: the blue loading screen stays until the film's first frame (`playback-restart`, fallback: position > 1 s), then transparent with VCR messages: "▶ PLAY" + "СЕРІЯ n/N" + title for 4 s at start; "❚❚ PAUSE" + tape counter while paused; "▶▶ / ◀◀ 0:01:06" after seeks (direction from position before `seek` vs after); "▶ PLAY" on resume; green 20-block VOLUME bar on volume change; blinking "ЗАВАНТАЖЕННЯ" top right while buffering > 0.7 s. Messages react to mpv events, so they also appear for changes not made from the phone.
+- `TvBox` starts mpv in `init()`, so the TV shows the blue screen right after boot; if mpv is missing, the server still starts (error logged). `remoteUrl` = `TVBOX_URL` env or `http://<first LAN IPv4>:<port>`.
+- `TVBOX_MPV_ARGS` env: extra mpv options, e.g. `--geometry=960x540+40+40` for development.
+- Checked on Windows (window captures): idle, loading, start card, seek, resume, pause, volume.
 
 ## Договорённости
 

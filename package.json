@@ -10,7 +10,7 @@
     "play:pi": "node torrent/cli.js --pi",
     "start": "node server/index.js",
     "start:pi": "node server/index.js --pi",
-    "build": "vite build --config web/vite.config.js",
+    "build": "node scripts/tv-fonts.mjs && vite build --config web/vite.config.js",
     "dev:web": "vite --config web/vite.config.js"
   },
   "engines": {

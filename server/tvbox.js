@@ -1,6 +1,7 @@
-// tvbox.js — ties the download library and mpv together; one playback at a time
+// tvbox.js — ties the download library, mpv and the TV screen together; one playback at a time
 import { EventEmitter } from 'node:events';
 import { MpvPlayer } from '../player/player.js';
+import { TvScreen, TV_ARGS } from '../player/tvscreen.js';
 import { Library, httpError } from '../library/library.js';
 
 // Control actions accepted by control(); value is validated per action
@@ -17,9 +18,12 @@ const ACTIONS = {
 };
 
 export class TvBox extends EventEmitter {
-  constructor({ playerArgs = [], cacheDir, policy } = {}) {
+  // remoteUrl: address of the phone remote, shown on the TV's idle screen
+  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null } = {}) {
     super();
-    this.playerArgs = playerArgs;
+    this.playerArgs = [...TV_ARGS, ...playerArgs];
+    this.remoteUrl = remoteUrl;
+    this.tv = null;
     this.library = new Library({ dir: cacheDir, policy });
     this.library.on('changed', () => {
       this.emit('downloads', this.library.list());
@@ -34,8 +38,15 @@ export class TvBox extends EventEmitter {
     this.error = null;
   }
 
-  init() {
-    return this.library.load();
+  // Loads the library and turns the TV on (blue "insert a tape" screen)
+  async init() {
+    await this.library.load();
+    try {
+      await this.#ensurePlayer();
+    } catch (err) {
+      // No mpv here (e.g. a dev machine): the API still works, playback will fail with a clear error
+      this.emit('error', err);
+    }
   }
 
   // Download without playing
@@ -57,6 +68,7 @@ export class TvBox extends EventEmitter {
       const item = id ? this.library.get(id) : await this.library.add(magnet);
       if (!item) throw httpError(404, `No such download: ${id}`);
       if (session !== this.session) return;
+      if (!this.title) this.#set({ title: item.title });   // a new magnet: name known after metadata
       const source = await this.library.stream(item.id, episode);
       if (session !== this.session) {
         // Cancelled by stop() before this item became current. When switching episodes of the
@@ -142,18 +154,26 @@ export class TvBox extends EventEmitter {
     await this.library.release(id);
   }
 
-  // mpv is started lazily and restarted if its window was closed
+  // mpv starts with the server (the TV shows the blue screen) and again on play if its window was closed
   async #ensurePlayer() {
     if (this.player) return this.player;
     const player = new MpvPlayer({ extraArgs: this.playerArgs });
+    const tv = new TvScreen(player, { remoteUrl: this.remoteUrl });
     player.on('state', () => this.#changed());
     player.on('end-file', (e) => this.#onEndFile(e));
     player.on('exit', () => {
-      if (this.player === player) this.player = null;
+      tv.stop();
+      if (this.player === player) {
+        this.player = null;
+        this.tv = null;
+      }
       if (this.phase === 'playing' || this.phase === 'loading') this.stop();
     });
     await player.start();
     this.player = player;
+    this.tv = tv;
+    tv.start();
+    this.#updateTv();
     return player;
   }
 
@@ -187,7 +207,12 @@ export class TvBox extends EventEmitter {
 
   #set(fields) {
     Object.assign(this, fields);
+    this.#updateTv();
     this.#changed();
+  }
+
+  #updateTv() {
+    this.tv?.setScene(this.phase, { title: this.title, error: this.error, episode: this.status().episode });
   }
 
   #changed() {
