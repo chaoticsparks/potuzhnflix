@@ -1,10 +1,12 @@
-# TV Box: приставка для телевизора
+# ПотужнFLIX: приставка для телевизора
 
 Контекст проекта, перенесённый из чата в claude.ai. Этот файл лежит в корне репозитория, и Claude Code читает его автоматически.
 
 ## Идея
 
 Самодельная приставка, которая подключается к телевизору по HDMI и выходит в интернет через домашний Wi‑Fi.
+
+**Name: «ПотужнFLIX»** (logo: `logo.png` in the repo root). UI language: Ukrainian.
 
 - **Управление:** с телефона через простое PWA. Пользователь вставляет magnet-ссылку и нажимает «Смотреть» или «Скачать».
 - **Воспроизведение:** приставка скачивает фильм по торренту во временное хранилище и сразу начинает показ, не дожидаясь полной загрузки. Торрент с несколькими видео (сериал) играет как плейлист.
@@ -70,13 +72,13 @@ Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebS
    - WebSocket со статусом и списком загрузок.
    - Раздаёт PWA.
    - Связывает библиотеку загрузок → mpv.
-5. **PWA-пульт.** ← NEXT
+5. **PWA-пульт.** ✅ DONE (`npm run build`, see `web/`). Not yet tried on a real phone.
    - Поле для magnet-ссылки: «Смотреть» / «Скачать».
    - Экран пульта: пауза, ползунок перемотки, громкость, ±10 с, субтитры и аудиодорожки. For series: episode name, next / previous.
    - Downloads screen: list with progress / state / expiry, pause/resume, keep, delete, free disk space. Series: episode list with per-episode progress, "continue from episode N".
    - Устанавливается на главный экран телефона.
    - Результат: полностью рабочий пульт с телефона (пока на компьютере).
-6. **Перенос на Pi.**
+6. **Перенос на Pi.** ← NEXT
    - Запись ОС, Wi‑Fi, SSH, монтирование Lexar.
    - mDNS `tvbox.local`.
    - systemd-сервисы с автозапуском и перезапуском при сбое.
@@ -96,7 +98,8 @@ Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebS
 tvbox/
   CLAUDE.md
   README.md           # install and run instructions (mpv, Node.js)
-  package.json        # "type": "module", скрипты: npm run player / player:pi / play / play:pi / start / start:pi
+  logo.png            # the logo, source for the icons in web/public
+  package.json        # "type": "module", скрипты: player / player:pi / play / play:pi / start / start:pi / build / dev:web
   player/
     player.js         # класс MpvPlayer (EventEmitter)
     cli.js            # консольный пульт для ручной проверки
@@ -107,9 +110,16 @@ tvbox/
     library.js        # Library: persistent downloads, playlists, pause/resume/keep/delete, auto-cleanup
   server/
     tvbox.js          # TvBox: library → mpv, one playback, episodes, status
-    index.js          # Fastify: REST /api/*, WebSocket /ws, static public/
-  public/
-    index.html        # placeholder until the PWA (stage 5)
+    index.js          # Fastify: REST /api/*, WebSocket /ws, static web/dist
+  web/                # phone remote: Svelte 5 + Vite, built into web/dist (git-ignored)
+    vite.config.js    # root web/, dev server :5173 proxies /api and /ws to the backend
+    index.html
+    public/           # manifest.webmanifest, icons (from logo.png), logo.jpg, mark.png
+    src/
+      main.js, App.svelte    # shell: header, tabs Пульт / Полиця, offline banner, toasts
+      app.css                # design tokens and shared styles
+      lib/                   # api.js (REST), live.svelte.js (WebSocket state), toast, format (uk)
+      components/            # Remote, Shelf, Tape, MagnetForm, TrackSheet, Icon
 ```
 
 ### `torrent/engine.js`, class `TorrentEngine`
@@ -163,7 +173,7 @@ tvbox/
   - `GET /api/downloads` → items; `POST /api/downloads {magnet}` → 201 item; `PATCH /api/downloads/:id {paused?, keep?}` → item; `DELETE /api/downloads/:id` → 204
   - `GET /api/storage` → `{dir, free, total, used, policy}`
   - WebSocket `/ws`: `{type: "status", ...}` (≤ 4/s) and `{type: "downloads", items}` (≤ 1/s); both sent on connect.
-  - Static files from `public/`.
+  - Static files from `web/dist` (a plain-text hint at `/` if it isn't built).
 
 ### Testing so far (Windows, real mpv)
 
@@ -174,6 +184,21 @@ tvbox/
 - Series (The Lone Ranger 1949, public domain, 16 episodes): playlist in natural order, only episodes 1–2 download while 1 plays, next/prev and their limits, auto-advance at eof, play a given episode, last episode remembered across restart, whole series downloads after stop.
 - Magnet-only API: Sintel magnet plays; https URL / old `torrent` field / malformed magnet → 400; `/api/search` → 404; series added by magnet (metadata pre-seeded, since IA has no peers) → playlist.
 - Not tested yet: the 507 disk-full path (test PC had 390 GB free), Raspberry Pi.
+
+### `web/`: phone remote (ПотужнFLIX)
+
+- Svelte 5 (runes) + Vite. No service worker: browsers allow it only over HTTPS, and the box is plain HTTP on the LAN. Manifest + apple meta tags give a home-screen icon anyway.
+- State: `live.svelte.js` holds `{connected, status, downloads}` from the `/ws` socket, reconnects with backoff and on `visibilitychange`. Commands go through `api.js` (REST). No polling except `/api/storage` every 15 s on the shelf.
+- **Design: follows the logo**, 2000s nostalgia, cozy analogue:
+  - Winamp-era player window: dark metal panel, bevelled silver "chrome" buttons (the logo's transport buttons), title bar with grip stripes.
+  - Green LCD with scanlines: VCR status word in 14-segment (PLAY / PAUS / LOAD / BUFF / STOP / ERR), tape counter in 7-segment with unlit "8" segments behind, Winamp-style scrolling title, green EQ bars from the logo (animated while playing). Tap the counter → time remaining.
+  - Seek bar with the downloaded part of the current file shaded; volume bar in Winamp green → yellow → red.
+  - VCR blue screen for "insert a tape" (idle / loading / error).
+  - Shelf = VHS cassettes: handwritten paper label, tape window whose reels show progress (tape moves left → right as it downloads, hubs spin while downloading), stickers REC / ПАУЗА / ЧЕКАЄ / ГРАЄ / ЗАПИСАНО, "keep" = record-protect tab, LED disk meter.
+  - Colours from the logo (tokens in `app.css`): near-black background, chrome greys, LCD green, bolt amber for the main action, FLIX red, VCR blue.
+  - Fonts (bundled, work offline, all with Cyrillic): Russo One (wordmark, headings, buttons), Pixelify Sans (LCD text only; its Cyrillic is too rough for buttons), Press Start 2P (small labels), Caveat (handwritten tape labels), DSEG7 / DSEG14 (segment displays, digits and Latin only). Body text: system font.
+- Mobile first, max width 480 px, safe-area insets, touch targets ≥ 44 px, `prefers-reduced-motion` stops animations, `aria-label`s on icon buttons.
+- Checked with Edge (Puppeteer, 390×844 mobile emulation) against the real backend + mpv: all screens render without horizontal overflow; pause / play / ±10 s / next episode / volume and seek sliders / stop / magnet validation / "continue watching" work.
 
 ### `player/player.js`, класс `MpvPlayer`
 

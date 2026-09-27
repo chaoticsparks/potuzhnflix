@@ -1,4 +1,5 @@
-// index.js — HTTP API + WebSocket status + static PWA files
+// index.js — HTTP API + WebSocket status + the phone remote (built into web/dist)
+import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
@@ -17,7 +18,13 @@ const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 box.on('error', (err) => app.log.error(err));
 
 await app.register(fastifyWebsocket);
-await app.register(fastifyStatic, { root: fileURLToPath(new URL('../public', import.meta.url)) });
+const WEB_DIST = fileURLToPath(new URL('../web/dist', import.meta.url));
+if (fs.existsSync(WEB_DIST)) {
+  await app.register(fastifyStatic, { root: WEB_DIST });
+} else {
+  app.get('/', (req, reply) => reply.type('text/plain; charset=utf-8')
+    .send('ПотужнFLIX: the remote is not built yet. Run "npm run build".'));
+}
 
 // Errors carry statusCode (validation → 400, library → 404/409/507); anything else is a torrent/mpv failure
 app.setErrorHandler((err, req, reply) => {

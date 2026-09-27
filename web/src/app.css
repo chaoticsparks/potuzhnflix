@@ -1,0 +1,263 @@
+/* app.css — ПотужнFLIX look: Winamp-era chrome, green LCD, VHS tapes, VCR blue */
+
+@font-face {
+  font-family: 'DSEG7';
+  src: url('../../node_modules/dseg/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2') format('woff2');
+  font-display: block;
+}
+@font-face {
+  font-family: 'DSEG14';
+  src: url('../../node_modules/dseg/fonts/DSEG14-Classic/DSEG14Classic-Bold.woff2') format('woff2');
+  font-display: block;
+}
+
+:root {
+  /* Colours picked from the logo */
+  --bg: #07080a;
+  --bg-2: #101217;
+  --text: #e9edf2;
+  --muted: #8c95a1;
+
+  --chrome-1: #f5f7fa;   /* bevel highlight */
+  --chrome-2: #d3d8df;
+  --chrome-3: #a9b0ba;
+  --chrome-4: #6c747f;
+  --chrome-5: #3b414a;   /* bevel shadow */
+  --ink: #1a1d22;        /* glyphs on chrome buttons */
+
+  --panel-hi: #3a404a;
+  --panel: #262b33;
+  --panel-lo: #15181d;
+
+  --lcd-bg: #040a04;
+  --lcd: #98ff4f;
+  --lcd-mid: #4fb52a;
+  --lcd-off: #132611;    /* unlit segments */
+
+  --bolt: #ff9416;
+  --bolt-hi: #ffd23a;
+  --flix: #e8211d;
+  --vcr: #1739c4;
+  --paper: #f3ecd9;
+  --paper-ink: #1f2a6b;
+  --tape: #121214;
+
+  --f-head: 'Russo One', system-ui, sans-serif;
+  --f-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --f-pixel: 'Pixelify Sans', monospace;   /* LCD text only: its Cyrillic is too rough for buttons */
+  --f-tiny: 'Press Start 2P', monospace;
+  --f-hand: 'Caveat', cursive;
+  --f-seg7: 'DSEG7', monospace;
+  --f-seg14: 'DSEG14', monospace;
+
+  --radius: 6px;
+  --gutter: 14px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(120% 60% at 50% 0%, #1a1e26 0%, transparent 60%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--f-body);
+  font-size: 16px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+button, input { font: inherit; color: inherit; }
+button { touch-action: manipulation; cursor: pointer; }
+button:disabled { cursor: default; }
+
+:focus-visible { outline: 2px solid var(--bolt-hi); outline-offset: 2px; }
+
+/* ---------- Chrome bevel (the logo's transport buttons) ---------- */
+
+.chrome {
+  background: linear-gradient(180deg, var(--chrome-1) 0%, var(--chrome-2) 45%, var(--chrome-3) 100%);
+  color: var(--ink);
+  border: 2px solid;
+  border-color: var(--chrome-1) var(--chrome-5) var(--chrome-5) var(--chrome-1);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 0 #000, inset 0 -2px 0 rgb(0 0 0 / 0.12);
+}
+.chrome:active:not(:disabled), .chrome.pressed {
+  background: linear-gradient(180deg, var(--chrome-3) 0%, var(--chrome-2) 100%);
+  border-color: var(--chrome-5) var(--chrome-1) var(--chrome-1) var(--chrome-5);
+  box-shadow: inset 0 2px 3px rgb(0 0 0 / 0.35);
+  transform: translateY(1px);
+}
+.chrome:disabled { opacity: 0.5; filter: grayscale(1); }
+
+/* Dark metal panel (the player window) */
+.panel {
+  background: linear-gradient(180deg, var(--panel-hi) 0%, var(--panel) 18%, var(--panel-lo) 100%);
+  border: 2px solid;
+  border-color: #59616d #0b0c0f #0b0c0f #59616d;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* Title bar with grip stripes, like a Winamp skin */
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-family: var(--f-tiny);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--chrome-2);
+  text-transform: uppercase;
+}
+.titlebar::before, .titlebar::after {
+  content: '';
+  flex: 1;
+  height: 6px;
+  background: repeating-linear-gradient(180deg, var(--chrome-4) 0 1px, transparent 1px 3px);
+  opacity: 0.8;
+}
+
+/* ---------- LCD ---------- */
+
+.lcd {
+  position: relative;
+  background: radial-gradient(140% 120% at 30% 0%, #0b1a0a 0%, var(--lcd-bg) 70%);
+  color: var(--lcd);
+  border: 2px solid;
+  border-color: #000 #3d444d #3d444d #000;
+  border-radius: 4px;
+  box-shadow: inset 0 0 18px rgb(0 0 0 / 0.9);
+  text-shadow: 0 0 6px rgb(152 255 79 / 0.45);
+  overflow: hidden;
+  font-family: var(--f-pixel);
+}
+/* Scanlines */
+.lcd::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(180deg, rgb(0 0 0 / 0.28) 0 1px, transparent 1px 3px);
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 14px;
+  font-family: var(--f-head);
+  font-weight: 400;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.btn.small { min-height: 36px; padding: 6px 10px; font-size: 14px; }
+
+/* Amber "power" button — the bolt colour, for the main action */
+.btn.hot {
+  background: linear-gradient(180deg, var(--bolt-hi) 0%, var(--bolt) 70%, #c96400 100%);
+  border-color: #ffe9a0 #7a3a00 #7a3a00 #ffe9a0;
+  color: #2a1400;
+}
+.btn.hot:active:not(:disabled) {
+  background: linear-gradient(180deg, #c96400 0%, var(--bolt) 100%);
+  border-color: #7a3a00 #ffe9a0 #ffe9a0 #7a3a00;
+}
+.btn.danger { color: #8f0f0c; }
+
+/* ---------- Range sliders (Winamp position / volume bars) ---------- */
+
+input[type='range'].slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  --fill: 0%;
+  --buffer: 0%;
+}
+input[type='range'].slider::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid;
+  border-color: #000 #4d5561 #4d5561 #000;
+  background:
+    linear-gradient(90deg, var(--lcd-mid) var(--fill), transparent var(--fill)),
+    linear-gradient(90deg, #1e3b17 var(--buffer), transparent var(--buffer)),
+    #07090b;
+}
+input[type='range'].slider::-moz-range-track {
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid;
+  border-color: #000 #4d5561 #4d5561 #000;
+  background:
+    linear-gradient(90deg, var(--lcd-mid) var(--fill), transparent var(--fill)),
+    linear-gradient(90deg, #1e3b17 var(--buffer), transparent var(--buffer)),
+    #07090b;
+}
+input[type='range'].slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 30px;
+  height: 22px;
+  margin-top: -7px;
+  border-radius: 3px;
+  border: 2px solid;
+  border-color: var(--chrome-1) var(--chrome-5) var(--chrome-5) var(--chrome-1);
+  background:
+    repeating-linear-gradient(90deg, transparent 0 9px, var(--chrome-4) 9px 10px, transparent 10px 12px),
+    linear-gradient(180deg, var(--chrome-1), var(--chrome-3));
+  box-shadow: 0 2px 0 #000;
+}
+input[type='range'].slider::-moz-range-thumb {
+  width: 26px;
+  height: 18px;
+  border-radius: 3px;
+  border: 2px solid;
+  border-color: var(--chrome-1) var(--chrome-5) var(--chrome-5) var(--chrome-1);
+  background: linear-gradient(180deg, var(--chrome-1), var(--chrome-3));
+  box-shadow: 0 2px 0 #000;
+}
+/* Volume: Winamp's green → yellow → red bar */
+input[type='range'].slider.volume::-webkit-slider-runnable-track {
+  background:
+    linear-gradient(90deg, transparent var(--fill), #07090b var(--fill)),
+    linear-gradient(90deg, #3bbf2a, #d8e22b 65%, #ff4a1c);
+}
+input[type='range'].slider.volume::-moz-range-track {
+  background:
+    linear-gradient(90deg, transparent var(--fill), #07090b var(--fill)),
+    linear-gradient(90deg, #3bbf2a, #d8e22b 65%, #ff4a1c);
+}
+input[type='range'].slider:disabled { opacity: 0.4; }
+
+/* ---------- Misc ---------- */
+
+.tiny {
+  font-family: var(--f-tiny);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.muted { color: var(--muted); }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

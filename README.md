@@ -1,6 +1,8 @@
-# TV Box
+# ПотужнFLIX
 
-A homemade TV box: pick a movie on your phone, and it plays on the TV over HDMI.
+![ПотужнFLIX](logo.png)
+
+A homemade TV box: paste a magnet link on your phone, and the film plays on the TV over HDMI.
 See [CLAUDE.md](CLAUDE.md) for the full project description.
 
 ## Requirements
@@ -46,6 +48,7 @@ brew install mpv
 
 ```bash
 npm install
+npm run build    # builds the phone remote into web/dist
 ```
 
 ## Running the player (manual test)
@@ -113,7 +116,38 @@ npm run start:pi # Raspberry Pi: mpv outputs straight to HDMI
 ```
 
 Listens on port 8080 on all interfaces (override with `PORT` / `HOST`) and prints the LAN
-address to open on your phone. The remote UI arrives in the next stage; until then, use the API:
+address to open on your phone.
+
+## Phone remote
+
+Open the address the backend prints (e.g. `http://192.168.1.20:8080`) on your phone, in the same
+Wi‑Fi network. To get an app icon, use "Add to Home Screen" (Safari) / "Install app" or
+"Add to home screen" (Chrome).
+
+- **Пульт** (remote): LCD with the tape counter (tap it to switch to time remaining), seek bar,
+  play/pause, ±10 s, previous/next episode, volume, audio and subtitle tracks, stop. When nothing
+  plays: the magnet form and "continue watching".
+- **Полиця** (shelf): every film as a VHS tape. The tape moves from the left reel to the right one
+  as it downloads. Pause/resume a download, protect a tape from automatic erasing (the lock tab),
+  erase it, pick a series episode.
+
+The UI is in Ukrainian. Windows Firewall may ask to allow Node.js on first start: allow it on
+private networks, or the phone can't connect.
+
+To work on the UI with hot reload, run the backend and the Vite dev server side by side, then open
+`http://<computer's IP>:5173` on the phone:
+
+```bash
+npm start
+```
+
+```bash
+npm run dev:web
+```
+
+## API
+
+The remote uses this API; it also works with `curl`:
 
 | Method | Path | Body / query |
 | --- | --- | --- |
