@@ -41,6 +41,8 @@ const box = new TvBox({
   // Set by deploy/use-disk.sh: the box starts without the disk and mounts it when it can
   requireMount: process.env.TVBOX_REQUIRE_MOUNT || null,
   canPower: ON_PI,
+  // Minutes on the idle screen before the TV's screen saver; 0 = never (default 20)
+  saverMs: process.env.TVBOX_SAVER_MIN ? Number(process.env.TVBOX_SAVER_MIN) * 60000 : undefined,
 });
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 box.on('error', (err) => app.log.error(err));
@@ -62,6 +64,12 @@ app.setErrorHandler((err, req, reply) => {
   // 501 (not on the Pi) and 503 (no film disk) are expected states, not failures
   if (code >= 500 && code !== 501 && code !== 503) req.log.error(err);
   reply.code(code).send({ error: err.message });
+});
+
+// Someone pressed something on the remote: wake the TV from its screen saver. GETs don't count:
+// the remote polls /api/health and /api/storage while it is open.
+app.addHook('onRequest', async (req) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') box.wake();
 });
 
 const magnet = { type: 'string', pattern: '^magnet:\\?' };
@@ -184,7 +192,15 @@ function broadcast(msg) {
 }
 
 app.get('/ws', { websocket: true }, (socket) => {
+  box.wake();   // the remote was just opened (or the phone unlocked): show the TV's idle screen
   clients.add(socket);
+  socket.on('message', (data) => {
+    try {
+      if (JSON.parse(data).type === 'wake') box.wake();
+    } catch {
+      // not JSON: ignore
+    }
+  });
   socket.send(JSON.stringify({ type: 'status', ...box.status() }));
   socket.send(JSON.stringify({ type: 'downloads', items: box.downloads() }));
   socket.on('close', () => clients.delete(socket));

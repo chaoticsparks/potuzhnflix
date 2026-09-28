@@ -37,10 +37,15 @@ export function connect() {
   };
 }
 
-// Phones drop sockets of background tabs; reconnect right away when the remote is opened again
+// Phones drop sockets of background tabs; reconnect right away when the remote is opened again.
+// A socket that survived gets a "wake" instead (a new connection wakes the TV by itself):
+// picking up the remote brings the TV back from its screen saver.
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
+    if (document.visibilityState !== 'visible') return;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'wake' }));
+    } else {
       retry = 1000;
       connect();
     }

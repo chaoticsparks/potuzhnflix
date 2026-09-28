@@ -46,14 +46,20 @@ const QR_PAPER = 'e4eaff';
 const QR_INK = '0a1a66';
 const QR_MODULE = 8;       // px per module: 25 modules + quiet zone ≈ 250 px, scannable from the sofa
 const MAX_TV_DOWNLOADS = 3;
+const SAVER_MS = 20 * 60 * 1000;
+const SAVER_TEXT = '5e5680';     // dim lavender on black
 
 export class TvScreen {
   // remoteUrl: shown as text (e.g. http://tvbox.local); qrUrl(): what the QR code opens — the IP
   // address, since many Android phones can't resolve .local names
-  constructor(player, { remoteUrl = null, qrUrl = null } = {}) {
+  // saverMs: after this long on the idle screen without wake() / a scene change, a dark screen saver
+  // (the animated scene costs mpv ~23 % of a Pi 4 core; 0 = never)
+  constructor(player, { remoteUrl = null, qrUrl = null, saverMs = SAVER_MS } = {}) {
     this.player = player;
     this.remoteUrl = remoteUrl;
     this.qrUrl = qrUrl;
+    this.saverMs = saverMs;
+    this.activeAt = Date.now();
     this.width = 1920;
     this.scene = 'idle';        // idle | loading | error | playing
     this.info = {};             // { title, error, episode: { index, count } }
@@ -91,6 +97,7 @@ export class TvScreen {
   setScene(scene, info = {}) {
     const key = (s, i) => `${s}|${i.title}|${i.episode?.index}`;
     const changed = key(scene, info) !== key(this.scene, this.info);
+    if (scene !== this.scene) this.activeAt = Date.now();   // e.g. a film stopped: idle time starts now
     this.scene = scene;
     this.info = info;
     // A new film / episode: keep the blue screen until its first frame, then show the play card
@@ -98,6 +105,15 @@ export class TvScreen {
       this.firstFrame = false;
       this.flash = null;
     }
+  }
+
+  // The remote was used: leave the screen saver, and restart the idle time
+  wake() {
+    this.activeAt = Date.now();
+  }
+
+  get saver() {
+    return this.saverMs > 0 && this.scene === 'idle' && Date.now() - this.activeAt >= this.saverMs;
   }
 
   // ---- Player events ----
@@ -147,12 +163,29 @@ export class TvScreen {
     const now = Date.now();
     if (this.flash && now > this.flash.until) this.flash = null;
     const blue = this.scene !== 'playing' || !this.firstFrame;
-    const synth = this.scene === 'idle';
+    const saver = this.saver;
+    const synth = this.scene === 'idle' && !saver;
     const d = drift(now);
-    // Layers: 1 = still background (resent only when the drift moves it), 3 = the moving grid, 2 = text
-    this.#send(1, synth ? this.#synthBackground(d) : blue ? this.#background() : '', 0);
+    // Layers: 1 = still background (resent only when the drift moves it), 3 = the moving grid, 2 = text.
+    // Screen saver: black (mpv's own idle window) with a dim clock, resent once a minute.
+    this.#send(1, saver ? '' : synth ? this.#synthBackground(d) : blue ? this.#background() : '', 0);
     this.#send(3, synth ? synthGrid(this.width, d, now) : '', 1);
-    this.#send(2, blue ? this.#blueScreen(now, d) : this.#vcrOsd(now), 2);
+    this.#send(2, saver ? this.#saverScreen(now) : blue ? this.#blueScreen(now, d) : this.#vcrOsd(now), 2);
+  }
+
+  // Dim clock and name, jumping to a new place every minute (nothing stays lit in one spot)
+  #saverScreen(now) {
+    const minute = Math.floor(now / 60000);
+    const rnd = random(minute);
+    const x = Math.round(MARGIN + 200 + rnd() * (this.width - 2 * MARGIN - 400));
+    const y = Math.round(MARGIN + 60 + rnd() * (H - 2 * MARGIN - 160));
+    const t = new Date(minute * 60000);
+    const time = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+    const dim = '\\bord0\\shad0';
+    return [
+      text(x, y, 5, 56, SAVER_TEXT, time, '', 0, '', dim),
+      text(x, y + 64, 5, 18, SAVER_TEXT, 'ПотужнFLIX', '', 0, '', `${dim}\\1a&H40&`),
+    ].join('\n');
   }
 
   #send(id, data, z) {

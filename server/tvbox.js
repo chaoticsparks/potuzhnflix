@@ -31,9 +31,11 @@ export class TvBox extends EventEmitter {
   // for the QR code.
   // requireMount: mount point the downloads live on (the box works without it, just no films).
   // canPower: the box may shut down / reboot the machine (the Pi, not a dev PC).
-  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null, qrUrl = null, requireMount = null, canPower = false } = {}) {
+  // saverMs: idle time before the TV's screen saver (0 = never).
+  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null, qrUrl = null, requireMount = null, canPower = false, saverMs } = {}) {
     super();
     this.playerArgs = [...TV_ARGS, ...playerArgs];
+    this.saverMs = saverMs;
     this.remoteUrl = remoteUrl;
     this.qrUrl = qrUrl;
     this.requireMount = requireMount;
@@ -268,11 +270,16 @@ export class TvBox extends EventEmitter {
     await this.library.release(id);
   }
 
+  // Someone used the remote: bring the TV back from the screen saver
+  wake() {
+    this.tv?.wake();
+  }
+
   // mpv starts with the server (the TV shows the blue screen) and again on play if its window was closed
   async #ensurePlayer() {
     if (this.player) return this.player;
     const player = new MpvPlayer({ extraArgs: this.playerArgs });
-    const tv = new TvScreen(player, { remoteUrl: this.remoteUrl, qrUrl: this.qrUrl });
+    const tv = new TvScreen(player, { remoteUrl: this.remoteUrl, qrUrl: this.qrUrl, saverMs: this.saverMs });
     player.on('state', () => this.#changed());
     player.on('end-file', (e) => this.#onEndFile(e));
     player.on('log', (line) => {
