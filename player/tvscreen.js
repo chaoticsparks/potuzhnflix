@@ -25,6 +25,7 @@ const BLUE = '1739c4';
 const WHITE = 'ffffff';
 const PALE = 'c9d6ff';
 const GREEN = '98ff4f';
+const YELLOW = 'ffd23a';
 const SHADOW = '0a1a66';
 
 export class TvScreen {
@@ -63,7 +64,7 @@ export class TvScreen {
     this.player.off('playback-restart', this.onRestart);
   }
 
-  // scene: idle | loading | error | playing; info: { title, error, episode }
+  // scene: idle | loading | error | playing | poweroff; info: { title, error, episode, warning, reboot }
   setScene(scene, info = {}) {
     const key = (s, i) => `${s}|${i.title}|${i.episode?.index}`;
     const changed = key(scene, info) !== key(this.scene, this.info);
@@ -168,12 +169,18 @@ export class TvScreen {
     const mm = String(t.getMinutes()).padStart(2, '0');
     out.push(text(W - MARGIN + dx, MARGIN + dy, 9, 44, WHITE, hh, ':', blink ? 1 : 0, mm));
 
-    if (this.scene === 'idle') {
+    if (this.scene === 'poweroff') {
+      const reboot = this.info.reboot;
+      out.push(text(cx, cy - 30, 5, 52, WHITE, reboot ? 'ПЕРЕЗАВАНТАЖУЮСЬ' : 'ВИМИКАЮСЬ', '...', Math.floor(now / 400) % 4));
+      out.push(text(cx, cy + 60, 5, 26, PALE, reboot ? 'ПУЛЬТ ПІДКЛЮЧИТЬСЯ САМ' : 'ДО ЗУСТРІЧІ!'));
+    } else if (this.scene === 'idle') {
       out.push(text(cx, cy - 40, 5, 64, WHITE, 'ВСТАВТЕ КАСЕТУ', '_', blink ? 1 : 0));
       if (this.remoteUrl) {
         out.push(text(cx, cy + 80, 5, 24, PALE, 'ПУЛЬТ НА ТЕЛЕФОНІ:'));
         out.push(text(cx, cy + 130, 5, 30, WHITE, this.remoteUrl));
       }
+      // e.g. the downloads' disk is missing: the box works, but can't play anything
+      if (this.info.warning) out.push(text(cx, cy + 220, 5, 28, YELLOW, `! ${this.info.warning}`));
     } else if (this.scene === 'error') {
       out.push(text(cx, cy - 90, 5, 52, WHITE, 'КАСЕТУ НЕ ПРОЧИТАНО', '_', blink ? 1 : 0));
       wrap(humanError(this.info.error ?? ''), 44).slice(0, 3).forEach((line, i) => {

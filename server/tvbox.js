@@ -1,10 +1,17 @@
 // tvbox.js — ties the download library, mpv and the TV screen together; one playback at a time
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { MpvPlayer } from '../player/player.js';
 import { TvScreen, TV_ARGS } from '../player/tvscreen.js';
 import { Library, httpError } from '../library/library.js';
 
+const run = promisify(execFile);
 const DISPLAY_RETRY_MS = 30 * 1000;
+const STORAGE_RETRY_MS = 30 * 1000;
+const NO_DISK = 'Film disk is not connected';
 
 // Control actions accepted by control(); value is validated per action
 const ACTIONS = {
@@ -20,11 +27,15 @@ const ACTIONS = {
 };
 
 export class TvBox extends EventEmitter {
-  // remoteUrl: address of the phone remote, shown on the TV's idle screen
-  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null } = {}) {
+  // remoteUrl: address of the phone remote, shown on the TV's idle screen.
+  // requireMount: mount point the downloads live on (the box works without it, just no films).
+  // canPower: the box may shut down / reboot the machine (the Pi, not a dev PC).
+  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null, requireMount = null, canPower = false } = {}) {
     super();
     this.playerArgs = [...TV_ARGS, ...playerArgs];
     this.remoteUrl = remoteUrl;
+    this.requireMount = requireMount;
+    this.canPower = canPower;
     this.tv = null;
     this.library = new Library({ dir: cacheDir, policy });
     this.library.on('changed', () => {
@@ -32,6 +43,9 @@ export class TvBox extends EventEmitter {
       this.#changed();
     });
     this.library.on('error', (err) => this.emit('error', err));
+    this.libraryReady = false;
+    this.storageError = null;
+    this.poweringOff = null;   // 'poweroff' | 'reboot' once requested
     this.player = null;
     this.session = 0;   // bumped by every play/stop, so a stale play() can tell it was superseded
     this.phase = 'idle';   // idle | loading | playing | error
@@ -40,20 +54,40 @@ export class TvBox extends EventEmitter {
     this.error = null;
   }
 
-  // Loads the library and turns the TV on (blue "insert a tape" screen)
+  // Turns the TV on (blue "insert a tape" screen), then opens the library — which may have to wait
+  // for its disk; the TV and the remote work meanwhile
   async init() {
-    await this.library.load();
     try {
       await this.#ensurePlayer();
     } catch (err) {
       // No mpv here (e.g. a dev machine): the API still works, playback will fail with a clear error
       this.emit('error', err);
     }
+    await this.#openLibrary();
   }
 
   // Download without playing
   download({ magnet }) {
+    this.#needLibrary();
     return this.library.add(magnet);
+  }
+
+  downloads() {
+    return this.libraryReady ? this.library.list() : [];
+  }
+
+  async updateDownload(id, { paused, keep }) {
+    this.#needLibrary();
+    if (!this.library.get(id)) throw httpError(404, `No such download: ${id}`);
+    if (keep !== undefined) this.library.setKeep(id, keep);
+    if (paused === true) await this.library.pause(id);
+    if (paused === false) await this.library.resume(id);
+    return this.library.get(id);
+  }
+
+  storage() {
+    this.#needLibrary();
+    return this.library.storage();
   }
 
   // Plays a library item ({ id, episode? }) or a new magnet link ({ magnet }, added to the library).
@@ -61,6 +95,7 @@ export class TvBox extends EventEmitter {
   // Resolves when mpv has started loading; the long part is torrent metadata.
   async play({ id, episode, magnet }) {
     if (!id && !magnet) throw httpError(400, 'id or magnet is required');
+    this.#needLibrary();
     const session = ++this.session;
     // Switching episodes of the same item keeps it marked as playing (no download reshuffle)
     if (!id || id !== this.current) await this.#release();
@@ -116,8 +151,30 @@ export class TvBox extends EventEmitter {
 
   // Deleting the film that is playing stops it first
   async deleteDownload(id) {
+    this.#needLibrary();
     if (this.current === id) await this.stop();
     await this.library.remove(id);
+  }
+
+  // Proper shutdown / reboot, so the power can be pulled safely afterwards: playback stops, the
+  // library is flushed, and systemd unmounts the disk cleanly (an NTFS disk comes back "dirty"
+  // otherwise). Resolves before the machine goes down, so the phone gets the answer.
+  async power(action) {
+    if (!this.canPower) throw httpError(501, 'Power control is only available on the TV box');
+    if (action !== 'poweroff' && action !== 'reboot') throw httpError(400, `Unknown power action: ${action}`);
+    await this.stop().catch(() => {});
+    if (this.libraryReady) await this.library.flush();
+    this.poweringOff = action;
+    this.#updateTv();
+    this.#changed();
+    setTimeout(() => {
+      run('sudo', ['-n', 'systemctl', action]).catch((err) => {
+        this.poweringOff = null;
+        this.#updateTv();
+        this.#changed();
+        this.emit('error', new Error(`${action} failed: ${err.message}`));
+      });
+    }, 1500);   // let the TV show the message and the reply reach the phone
   }
 
   status() {
@@ -140,15 +197,61 @@ export class TvBox extends EventEmitter {
         state: item.state, progress: item.progress, downloaded: item.downloaded, length: item.length,
         downloadSpeed: item.downloadSpeed, peers: item.peers,
       } : null,
+      storage: { ok: this.libraryReady && !this.storageError, error: this.storageError },
+      power: this.canPower,
+      poweringOff: this.poweringOff,
     };
   }
 
   async shutdown() {
     this.closing = true;
     clearTimeout(this.displayRetry);
+    clearTimeout(this.storageRetry);
+    clearInterval(this.mountWatch);
     this.session++;
     await this.player?.quit();
-    await this.library.close();
+    if (this.libraryReady) await this.library.close();
+  }
+
+  // The downloads' disk may be missing, or refuse to mount (an NTFS disk after a power cut).
+  // Try to mount it and load the library; retry every 30 s until it works.
+  async #openLibrary() {
+    if (this.closing || this.libraryReady) return;
+    try {
+      if (this.requireMount && !(await isMounted(this.requireMount))) {
+        // sudoers allows exactly this; fstab has the options (never forced)
+        await run('sudo', ['-n', 'mount', this.requireMount]).catch(() => {});
+        if (!(await isMounted(this.requireMount))) throw new Error(NO_DISK);
+      }
+      await this.library.load();
+      this.libraryReady = true;
+      this.#setStorageError(null);
+      this.emit('downloads', this.library.list());
+      if (this.requireMount) this.#watchMount();
+    } catch (err) {
+      this.#setStorageError(err.message);
+      this.storageRetry = setTimeout(() => this.#openLibrary(), STORAGE_RETRY_MS);
+    }
+  }
+
+  // The disk unplugged while running: tell the user (the library can't be unloaded safely)
+  #watchMount() {
+    this.mountWatch = setInterval(async () => {
+      const ok = await isMounted(this.requireMount);
+      this.#setStorageError(ok ? null : 'Film disk was disconnected; restart the box');
+    }, STORAGE_RETRY_MS);
+  }
+
+  #setStorageError(message) {
+    if (message === this.storageError) return;
+    this.storageError = message;
+    if (message) this.emit('error', new Error(message));
+    this.#updateTv();
+    this.#changed();
+  }
+
+  #needLibrary() {
+    if (!this.libraryReady) throw httpError(503, this.storageError ?? NO_DISK);
   }
 
   async #release() {
@@ -242,11 +345,27 @@ export class TvBox extends EventEmitter {
   }
 
   #updateTv() {
-    this.tv?.setScene(this.phase, { title: this.title, error: this.error, episode: this.status().episode });
+    this.tv?.setScene(this.poweringOff ? 'poweroff' : this.phase, {
+      title: this.title,
+      error: this.error,
+      episode: this.status().episode,
+      warning: this.storageError ? 'Диск з фільмами не підключено' : null,
+      reboot: this.poweringOff === 'reboot',
+    });
   }
 
   #changed() {
     this.emit('status', this.status());
+  }
+}
+
+// A mount point is mounted when it sits on a different device than its parent directory
+async function isMounted(dir) {
+  try {
+    const [inner, outer] = await Promise.all([fs.stat(dir), fs.stat(path.dirname(dir))]);
+    return inner.dev !== outer.dev;
+  } catch {
+    return false;
   }
 }
 

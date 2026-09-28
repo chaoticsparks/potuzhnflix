@@ -34,9 +34,13 @@ if ! grep -q 'video=HDMI-A-1:' "$CMDLINE"; then
   echo "   added video=HDMI-A-1:1920x1080@60D — reboot to apply"
 fi
 
-echo "== Let $APP_USER start/stop/restart the service without a password (for updates)"
+echo "== Let $APP_USER run exactly these as root without a password:"
+echo "   start/stop/restart the service (updates), power off / reboot (the remote's button),"
+echo "   mount the download disk (the box retries when it's plugged in later)"
 put /etc/sudoers.d/potuzhnflix 440 <<EOF
 $APP_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start potuzhnflix, /usr/bin/systemctl stop potuzhnflix, /usr/bin/systemctl restart potuzhnflix
+$APP_USER ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
+$APP_USER ALL=(root) NOPASSWD: /usr/bin/mount $TVBOX_MOUNT
 EOF
 visudo -cf /etc/sudoers.d/potuzhnflix
 

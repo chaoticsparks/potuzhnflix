@@ -11,3 +11,6 @@ put() {
   mv "$tmp" "$target"
   sync "$(dirname "$target")"
 }
+
+# Where use-disk.sh mounts the download disk (also named in the sudoers rule for mounting it)
+TVBOX_MOUNT=/mnt/tvbox-disk

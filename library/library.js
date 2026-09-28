@@ -251,6 +251,11 @@ export class Library extends EventEmitter {
     return { dir: this.dir, free, total, used, policy: this.policy };
   }
 
+  // Write library.json now (before a shutdown), instead of within the next few seconds
+  flush() {
+    return this.#save();
+  }
+
   async close() {
     clearInterval(this.ticker);
     clearInterval(this.sweeper);

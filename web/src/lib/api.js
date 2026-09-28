@@ -21,4 +21,5 @@ export const api = {
   update: (id, patch) => call('PATCH', `/api/downloads/${encodeURIComponent(id)}`, patch),   // { paused?, keep? }
   remove: (id) => call('DELETE', `/api/downloads/${encodeURIComponent(id)}`),
   storage: () => call('GET', '/api/storage'),
+  power: (action) => call('POST', '/api/power', { action }),   // 'poweroff' | 'reboot' (the Pi only)
 };

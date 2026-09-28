@@ -19,9 +19,10 @@
     down: 'M12 4v11M7 10l5 5 5-5M5 20h14',
     list: 'M4 6h16M4 12h16M4 18h16',
     shelf: 'M3 20h18M5 20V6h3v14M10 20V4h3v16M15 20l1.5-13 3 .4-1.5 12.6',
+    power: 'M12 3v8M6.4 6.6a8 8 0 1 0 11.2 0',
   };
   // Outlined glyphs; the rest are filled
-  const STROKE = new Set(['volume', 'audio', 'subs', 'lock', 'trash', 'down', 'list', 'shelf']);
+  const STROKE = new Set(['volume', 'audio', 'subs', 'lock', 'trash', 'down', 'list', 'shelf', 'power']);
 </script>
 
 <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">

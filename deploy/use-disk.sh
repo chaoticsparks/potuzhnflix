@@ -12,7 +12,7 @@ APP_USER="${SUDO_USER:?run it with sudo from the user that owns the app}"
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$APP_DIR/deploy/lib.sh"
 
-MNT=/mnt/tvbox-disk
+MNT="$TVBOX_MOUNT"   # from lib.sh
 DROPIN_DIR=/etc/systemd/system/potuzhnflix.service.d
 DROPIN="$DROPIN_DIR/disk.conf"
 
@@ -69,15 +69,15 @@ CACHE="$MNT/$FOLDER"
 [[ "$FSTYPE" == ext4 ]] && chown "$APP_USER:" "$CACHE"
 sudo -u "$APP_USER" test -w "$CACHE" || { echo "ERROR: $APP_USER can't write to $CACHE" >&2; exit 1; }
 
-echo "== Downloads go to $CACHE; the service starts only when the disk is mounted"
+echo "== Downloads go to $CACHE"
+# The service doesn't depend on the mount: without the disk the TV and the remote still work and
+# say the disk is missing, and the app mounts it (sudo mount $MNT) as soon as it can
 install -d "$DROPIN_DIR"
 put "$DROPIN" 644 <<EOF
 # Written by deploy/use-disk.sh — remove with: sudo bash deploy/use-disk.sh --off
-[Unit]
-RequiresMountsFor=$MNT
-
 [Service]
 Environment=TVBOX_CACHE=$CACHE
+Environment=TVBOX_REQUIRE_MOUNT=$MNT
 EOF
 systemctl daemon-reload
 systemctl restart potuzhnflix

@@ -39,6 +39,7 @@
     if (/not a valid magnet|must match pattern/i.test(message)) return 'Це не схоже на magnet-посилання.';
     if (/no video/i.test(message)) return 'У цьому торренті немає відео.';
     if (/disk space/i.test(message)) return 'Не вистачає місця на диску.';
+    if (/disk is not connected|disk was disconnected/i.test(message)) return 'Диск з фільмами не підключено.';
     return message;
   }
 </script>

@@ -19,9 +19,14 @@ const REMOTE_URL = process.env.TVBOX_URL ?? `http://${lanAddresses()[0] ?? 'loca
 // Extra mpv options, space-separated, e.g. TVBOX_MPV_ARGS="--geometry=960x540+40+40"
 const EXTRA_MPV_ARGS = (process.env.TVBOX_MPV_ARGS ?? '').split(/\s+/).filter(Boolean);
 
+const ON_PI = process.argv.includes('--pi');
+
 const box = new TvBox({
-  playerArgs: [...(process.argv.includes('--pi') ? PI_ARGS : []), ...EXTRA_MPV_ARGS],
+  playerArgs: [...(ON_PI ? PI_ARGS : []), ...EXTRA_MPV_ARGS],
   remoteUrl: REMOTE_URL,
+  // Set by deploy/use-disk.sh: the box starts without the disk and mounts it when it can
+  requireMount: process.env.TVBOX_REQUIRE_MOUNT || null,
+  canPower: ON_PI,
 });
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 box.on('error', (err) => app.log.error(err));
@@ -36,10 +41,12 @@ if (fs.existsSync(WEB_DIST)) {
     .send('ПотужнFLIX: the remote is not built yet. Run "npm run build".'));
 }
 
-// Errors carry statusCode (validation → 400, library → 404/409/507); anything else is a torrent/mpv failure
+// Errors carry statusCode (validation → 400, library → 404/409/507, no disk → 503, not on the Pi → 501);
+// anything else is a torrent/mpv failure
 app.setErrorHandler((err, req, reply) => {
   const code = err.statusCode ?? 502;
-  if (code >= 500) req.log.error(err);
+  // 501 (not on the Pi) and 503 (no film disk) are expected states, not failures
+  if (code >= 500 && code !== 501 && code !== 503) req.log.error(err);
   reply.code(code).send({ error: err.message });
 });
 
@@ -78,9 +85,19 @@ app.post('/api/stop', async () => {
 app.get('/api/status', () => box.status());
 app.get('/api/tracks', () => box.tracks());
 
+// Shut down / reboot the box properly (the Pi only). Body: { action: "poweroff" | "reboot" }
+app.post('/api/power', {
+  schema: {
+    body: { type: 'object', required: ['action'], properties: { action: { enum: ['poweroff', 'reboot'] } } },
+  },
+}, async (req) => {
+  await box.power(req.body.action);
+  return { ok: true };
+});
+
 // --- Downloads library ---
 
-app.get('/api/downloads', () => box.library.list());
+app.get('/api/downloads', () => box.downloads());
 
 app.post('/api/downloads', {
   schema: { body: { type: 'object', required: ['magnet'], properties: { magnet } } },
@@ -94,21 +111,14 @@ app.patch('/api/downloads/:id', {
   schema: {
     body: { type: 'object', properties: { paused: { type: 'boolean' }, keep: { type: 'boolean' } } },
   },
-}, async (req, reply) => {
-  const { id } = req.params;
-  if (!box.library.get(id)) return reply.code(404).send({ error: `No such download: ${id}` });
-  if (req.body.keep !== undefined) box.library.setKeep(id, req.body.keep);
-  if (req.body.paused === true) await box.library.pause(id);
-  if (req.body.paused === false) await box.library.resume(id);
-  return box.library.get(id);
-});
+}, (req) => box.updateDownload(req.params.id, req.body));
 
 app.delete('/api/downloads/:id', async (req, reply) => {
   await box.deleteDownload(req.params.id);
   reply.code(204);
 });
 
-app.get('/api/storage', () => box.library.storage());
+app.get('/api/storage', () => box.storage());
 
 // --- WebSocket: full state on connect, then throttled updates ---
 
@@ -124,7 +134,7 @@ function broadcast(msg) {
 app.get('/ws', { websocket: true }, (socket) => {
   clients.add(socket);
   socket.send(JSON.stringify({ type: 'status', ...box.status() }));
-  socket.send(JSON.stringify({ type: 'downloads', items: box.library.list() }));
+  socket.send(JSON.stringify({ type: 'downloads', items: box.downloads() }));
   socket.on('close', () => clients.delete(socket));
 });
 
