@@ -43,6 +43,8 @@ const box = new TvBox({
   canPower: ON_PI,
   // Minutes on the idle screen before the TV's screen saver; 0 = never (default 20)
   saverMs: process.env.TVBOX_SAVER_MIN ? Number(process.env.TVBOX_SAVER_MIN) * 60000 : undefined,
+  // Turn the TV on/off and switch its input over HDMI-CEC; TVBOX_CEC=off for a TV that mishandles it
+  cec: process.env.TVBOX_CEC !== 'off',
 });
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
 box.on('error', (err) => app.log.error(err));

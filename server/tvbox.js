@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { MpvPlayer } from '../player/player.js';
 import { TvScreen, TV_ARGS } from '../player/tvscreen.js';
 import { Library, httpError } from '../library/library.js';
+import { Cec } from './cec.js';
 
 const run = promisify(execFile);
 const DISPLAY_RETRY_MS = 30 * 1000;
@@ -32,10 +33,13 @@ export class TvBox extends EventEmitter {
   // requireMount: mount point the downloads live on (the box works without it, just no films).
   // canPower: the box may shut down / reboot the machine (the Pi, not a dev PC).
   // saverMs: idle time before the TV's screen saver (0 = never).
-  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null, qrUrl = null, requireMount = null, canPower = false, saverMs } = {}) {
+  // cec: turn the TV on/off and switch its input over HDMI-CEC (auto-detects the hardware; false to
+  // disable outright, e.g. a TV that mishandles CEC commands).
+  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null, qrUrl = null, requireMount = null, canPower = false, saverMs, cec = true } = {}) {
     super();
     this.playerArgs = [...TV_ARGS, ...playerArgs];
     this.saverMs = saverMs;
+    this.cec = cec ? new Cec() : null;
     this.remoteUrl = remoteUrl;
     this.qrUrl = qrUrl;
     this.requireMount = requireMount;
@@ -63,8 +67,10 @@ export class TvBox extends EventEmitter {
   // Turns the TV on (blue "insert a tape" screen), then opens the library — which may have to wait
   // for its disk; the TV and the remote work meanwhile
   async init() {
+    await this.cec?.start();
     try {
       await this.#ensurePlayer();
+      await this.cec?.turnOn();   // auto power-on + switch input when the box boots
     } catch (err) {
       // No mpv here (e.g. a dev machine): the API still works, playback will fail with a clear error
       this.emit('error', err);
@@ -208,6 +214,7 @@ export class TvBox extends EventEmitter {
       } : null,
       storage: { ok: this.libraryReady && !this.storageError, error: this.storageError },
       power: this.canPower,
+      cec: this.cec?.ready ?? false,
       poweringOff: this.poweringOff,
     };
   }
@@ -280,6 +287,8 @@ export class TvBox extends EventEmitter {
     if (this.player) return this.player;
     const player = new MpvPlayer({ extraArgs: this.playerArgs });
     const tv = new TvScreen(player, { remoteUrl: this.remoteUrl, qrUrl: this.qrUrl, saverMs: this.saverMs });
+    // The screen saver switching on/off is also the TV's cue to standby / wake over CEC
+    tv.on('saver', (on) => (on ? this.cec?.standby() : this.cec?.turnOn()));
     player.on('state', () => this.#changed());
     player.on('end-file', (e) => this.#onEndFile(e));
     player.on('log', (line) => {

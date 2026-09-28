@@ -2,6 +2,7 @@
 // a synthwave night scene when idle (sun, palms, a moving neon grid), a VCR blue screen while loading /
 // on error, and VCR-like messages over the film (▶ PLAY, ❚❚ PAUSE, seek counter, volume bar, buffering).
 import fs from 'node:fs';
+import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import qrcode from 'qrcode-generator';
 
@@ -49,17 +50,21 @@ const MAX_TV_DOWNLOADS = 3;
 const SAVER_MS = 20 * 60 * 1000;
 const SAVER_TEXT = '5e5680';     // dim lavender on black
 
-export class TvScreen {
+// Emits 'saver' (boolean) when the screen saver switches on or off — TvBox uses it to standby /
+// wake the TV over HDMI-CEC.
+export class TvScreen extends EventEmitter {
   // remoteUrl: shown as text (e.g. http://tvbox.local); qrUrl(): what the QR code opens — the IP
   // address, since many Android phones can't resolve .local names
   // saverMs: after this long on the idle screen without wake() / a scene change, a dark screen saver
   // (the animated scene costs mpv ~23 % of a Pi 4 core; 0 = never)
   constructor(player, { remoteUrl = null, qrUrl = null, saverMs = SAVER_MS } = {}) {
+    super();
     this.player = player;
     this.remoteUrl = remoteUrl;
     this.qrUrl = qrUrl;
     this.saverMs = saverMs;
     this.activeAt = Date.now();
+    this.saverActive = false;
     this.width = 1920;
     this.scene = 'idle';        // idle | loading | error | playing
     this.info = {};             // { title, error, episode: { index, count } }
@@ -164,6 +169,10 @@ export class TvScreen {
     if (this.flash && now > this.flash.until) this.flash = null;
     const blue = this.scene !== 'playing' || !this.firstFrame;
     const saver = this.saver;
+    if (saver !== this.saverActive) {
+      this.saverActive = saver;
+      this.emit('saver', saver);
+    }
     const synth = this.scene === 'idle' && !saver;
     const d = drift(now);
     // Layers: 1 = still background (resent only when the drift moves it), 3 = the moving grid, 2 = text.

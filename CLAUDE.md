@@ -85,7 +85,7 @@ Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebS
    - Настройка вывода mpv в DRM, проверка нагрева.
    - Результат: готовая приставка.
 7. **Улучшения (по желанию).**
-   - HDMI-CEC: автовключение ТВ и переключение входа.
+   - ~~HDMI-CEC: автовключение ТВ и переключение входа.~~ ✅ DONE (see `server/cec.js`): auto power-on + input switch at boot and on wake from the screen saver; the TV goes to standby when the screen saver starts.
    - Продолжение просмотра с места остановки, история.
    - Автопоиск субтитров.
    - Индикатор буферизации на ТВ.
@@ -120,6 +120,7 @@ tvbox/
     tvbox.js          # TvBox: library → mpv, one playback, episodes, status
     index.js          # Fastify: REST /api/*, WebSocket /ws, static web/dist
     health.js         # health(): temperature, power warnings, CPU, memory, network, uptime
+    cec.js            # Cec: turn the TV on/off and switch input over HDMI-CEC (cec-ctl)
   web/                # phone remote: Svelte 5 + Vite, built into web/dist (git-ignored)
     vite.config.js    # root web/, dev server :5173 proxies /api and /ws to the backend
     index.html
@@ -246,6 +247,7 @@ tvbox/
 - mpv is the only thing that draws on the TV (no browser/desktop on the Pi), so everything is ASS markup sent with mpv's `osd-overlay` command. Overlays: 1 = still background (z 0; VCR blue `#1739c4` + faint CRT scanlines, or the synthwave scene), 3 = the synthwave's moving grid (z 1), 2 = content (z 2). A 15 fps ticker composes them and sends only when a string changed. The synthwave scene (~25 KB of ASS) is cached and resent only when the drift moves it (2 px steps, every few seconds); the grid moves at 7.5 fps.
 - Cost on the Pi (idle, mpv CPU): 37 % of a core with the grid at 15 fps, ~23 % at 7.5 fps (54 °C, no throttling).
 - **Screen saver** (the Pi 4 has no sleep/suspend, and downloads must go on, so only the TV picture rests): after `saverMs` (default 20 min, `TVBOX_SAVER_MIN` env, 0 = never) on the idle scene without activity, the screen goes black (overlays 1/3 removed) with a dim clock + "ПотужнFLIX" that jumps to a random place every minute (1 send/min). Activity = `TvScreen.wake()` via `TvBox.wake()`: any non-GET API request (`onRequest` hook), a new `/ws` connection, or a `{type: "wake"}` WebSocket message (the remote sends it on `visibilitychange` → visible when its socket survived), plus any scene change (e.g. a film stopped). GETs don't count: an open remote polls `/api/health` and `/api/storage`. Checked on Windows: saver after the delay while a socket stays open; wake by a POST, a socket message and a new connection.
+- **HDMI-CEC** (`server/cec.js`, class `Cec`; `cec` TvBox option, default on, `TVBOX_CEC=off` disables — some TVs mishandle CEC): turns the TV on + switches it to our input at boot and whenever the screen saver ends, and puts the TV in standby when the screen saver starts. Uses `cec-ctl` (v4l-utils, already on Raspberry Pi OS; nothing to install) over the Pi's v4l2 CEC framework (`/dev/cec0`/`/dev/cec1`, one per HDMI port on `vc4_hdmi`). `Cec.start()` claims a Playback Device logical address on whichever adapter reports a real physical address (not `f.f.f.f`, i.e. actually wired to the TV — on this box that's `/dev/cec0`/HDMI0, physical address `2.0.0.0`); safe with no CEC hardware/TV at all (a dev PC, `cec-ctl` missing, or a disconnected port): every method just no-ops. `turnOn()` sends `IMAGE_VIEW_ON` then `ACTIVE_SOURCE`; `standby()` sends `STANDBY` addressed to the TV only (0), not the whole bus (a soundbar etc. stays on). `TvScreen` emits `'saver'` (boolean) on the transition (in `#tick()`); `TvBox` wires it to `cec.standby()` / `cec.turnOn()`, and calls `cec.turnOn()` once more after `#ensurePlayer()` in `init()` for the boot case (no saver transition to trigger it there). `status().cec` reports whether an adapter was claimed. Checked on the Pi (real Samsung TV): claims `/dev/cec0` (topology already showed the TV); `--to 0 --standby` on the saver's `'saver'` event made the TV stop responding to CEC queries (`--show-topology` came back empty); a POST request woke it and `--show-topology` showed `Power Status: On` again within ~4 s.
 - `TV_ARGS` (added by `TvBox`): `--osc=no` (no mpv controller / idle logo), `--osd-level=0` (no mpv messages; `osd-overlay` still renders), `--osd-fonts-dir=player/fonts`. Font: Press Start 2P (VCR blocky, Cyrillic), converted from @fontsource WOFF by `scripts/tv-fonts.mjs`. Cyrillic and Latin subsets are separate files of one family; libass takes each glyph from whichever file has it (checked).
 - Canvas: height 1080, width follows `osd-dimensions` (polled every 3 s). Margin 100 px for overscan. All text uppercase, white with black outline and a dark-blue shadow.
 - Scenes (`setScene(scene, {title, error, episode})`, driven by `TvBox` phases):

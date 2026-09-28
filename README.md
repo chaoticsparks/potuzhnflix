@@ -129,7 +129,12 @@ volume bar. It is all drawn by mpv's on-screen display, so it works on the Pi wi
 After 20 minutes on the idle screen with nobody using the remote, the TV goes dark with a dim
 clock (screen saver; downloads go on). Opening the remote or pressing anything brings it back.
 
+On the Pi, the box also turns the TV on and switches it to the right input by itself (HDMI-CEC)
+when it starts up and whenever the screen saver ends, and puts the TV in standby when the screen
+saver starts.
+
 - `TVBOX_SAVER_MIN` changes the screen saver delay in minutes (`0` = never).
+- `TVBOX_CEC=off` disables the HDMI-CEC control, for a TV that reacts badly to it.
 - `TVBOX_URL` changes the address shown (default: `http://<computer's IP>:8080`).
 - `TVBOX_MPV_ARGS` passes extra mpv options, e.g. `TVBOX_MPV_ARGS="--geometry=960x540"` for a
   smaller window while developing.
