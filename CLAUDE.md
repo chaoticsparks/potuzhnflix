@@ -119,6 +119,7 @@ tvbox/
   server/
     tvbox.js          # TvBox: library → mpv, one playback, episodes, status
     index.js          # Fastify: REST /api/*, WebSocket /ws, static web/dist
+    health.js         # health(): temperature, power warnings, CPU, memory, network, uptime
   web/                # phone remote: Svelte 5 + Vite, built into web/dist (git-ignored)
     vite.config.js    # root web/, dev server :5173 proxies /api and /ws to the backend
     index.html
@@ -127,7 +128,7 @@ tvbox/
       main.js, App.svelte    # shell: header, tabs Пульт / Полиця, offline banner, toasts
       app.css                # design tokens and shared styles
       lib/                   # api.js (REST), live.svelte.js (WebSocket state), toast, format (uk)
-      components/            # Remote, Shelf, Tape, MagnetForm, TrackSheet, Icon
+      components/            # Remote, Shelf, Tape, MagnetForm, TrackSheet, PowerSheet, Health, Icon
 ```
 
 ### `torrent/engine.js`, class `TorrentEngine`
@@ -184,6 +185,7 @@ tvbox/
   - `POST /api/stop`, `GET /api/status`, `GET /api/tracks`
   - `GET /api/downloads` → items; `POST /api/downloads {magnet}` → 201 item; `PATCH /api/downloads/:id {paused?, keep?, wanted?: [episode positions]}` → item; `DELETE /api/downloads/:id` → 204
   - `GET /api/storage` → `{dir, free, total, used, policy}`
+  - `GET /api/health` (`server/health.js`) → `{temperature (°C, thermal_zone0), power: {undervoltage, throttled: 'now'|'earlier'|null} (firmware `get_throttled`: the sysfs file if present — this Pi's kernel doesn't have it — else `vcgencmd get_throttled`; throttled includes the 80 °C soft limit), cpu (0–1 of all cores since the previous request), memory: {total, available}, network: {type: 'ethernet'|'wifi', iface, signal (dBm, /proc/net/wireless)} (interface of the lowest-metric default route), uptime (s)}`. Linux-only readings are `null` elsewhere (Windows dev).
   - WebSocket `/ws`: `{type: "status", ...}` (≤ 4/s) and `{type: "downloads", items}` (≤ 1/s); both sent on connect.
   - Static files from `web/dist` (a plain-text hint at `/` if it isn't built).
 
@@ -205,6 +207,7 @@ tvbox/
   - Remote = a **VCR deck** (`Remote.svelte`): black plastic panel with a printed label strip ("ПотужнFLIX · VHS · HQ · Hi-Fi Stereo", PLAY LED); a tape slot showing the playing tape's handwritten label (flap "Вставте касету" when empty); a cyan **VFD** display with a mesh: status word in 14-segment (PLAY / PAUS / LOAD / BUFF / STOP / ERR), VHS / HQ / Hi-Fi marks, tape counter in 7-segment with unlit "8" segments behind (tap → time remaining), scrolling title, episode and download stats.
   - Glossy silver piano keys with small labels: Попер. / −10 / Грати·Пауза (sunset gradient when paused) / +10 / Наст. / ⏏ Стоп; volume fader (purple → magenta → orange); AUDIO / SUB buttons. Seek bar with the downloaded part of the current file shaded.
   - Idle / loading / error: a small CRT TV with the VCR blue screen ("insert a tape", the new tape form, "continue").
+  - Under it on the Пульт tab, "Стан приставки" (`Health.svelte`): a small deck panel with a VFD: CPU temperature with a segment meter (cyan < 70 °C, orange < 80, red), CPU %, memory, network (Кабель / Wi-Fi · добре|середньо|слабко), uptime; warnings for undervoltage / overheating (now = red, since boot = orange). Polls `/api/health` every 5 s while the page is visible.
   - New tape form (`MagnetForm`): magnet field or "Вибрати .torrent файл" (hidden `<input type=file accept=".torrent,application/x-bittorrent">`); a picked file shows as a chip (name, size, ✕) in place of the field; the client checks the extension and 10 MB. Checked with Puppeteer (`uploadFile`).
   - Series on the shelf: a summary line ("Вибрано 3 з 10 серій · 9.6 ГБ" / "Завантажуються всі серії" / "Жодна серія не вибрана"), a toggle "Серії: завантажувати N з M", "Усі" / "Жодної", and per episode a download tick (role=checkbox), state (✔ / % / —) and a separate ▶. Taps are kept locally and sent once after 0.4 s. After "На полицю" (from either tab) the app switches to the shelf and opens the new series' episode list.
   - Shelf = VHS cassettes like the logo's (notched shell, VHS / HQ badges, silver-hub reels on both sides of a handwritten paper label): the reels show progress (tape moves left → right as it downloads, hubs spin while downloading), stickers REC / ПАУЗА / ЧЕКАЄ / ГРАЄ / ЗАПИСАНО (playing = sunset gradient + magenta glow), "keep" = record-protect tab, VFD disk meter. New tape form on a CRT blue screen above the shelf.

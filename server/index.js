@@ -6,6 +6,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { TvBox } from './tvbox.js';
+import { health } from './health.js';
 import { PI_ARGS } from '../player/player.js';
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -166,6 +167,10 @@ app.delete('/api/downloads/:id', async (req, reply) => {
 });
 
 app.get('/api/storage', () => box.storage());
+
+// --- The box itself: temperature, power warnings, CPU, memory, network, uptime ---
+
+app.get('/api/health', () => health());
 
 // --- WebSocket: full state on connect, then throttled updates ---
 

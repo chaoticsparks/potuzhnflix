@@ -37,5 +37,6 @@ export const api = {
   update: (id, patch) => call('PATCH', `/api/downloads/${encodeURIComponent(id)}`, patch),   // { paused?, keep?, wanted?: [episode positions] }
   remove: (id) => call('DELETE', `/api/downloads/${encodeURIComponent(id)}`),
   storage: () => call('GET', '/api/storage'),
+  health: () => call('GET', '/api/health'),
   power: (action) => call('POST', '/api/power', { action }),   // 'poweroff' | 'reboot' (the Pi only)
 };

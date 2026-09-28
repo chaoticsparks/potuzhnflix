@@ -5,6 +5,7 @@
   import Shelf from './components/Shelf.svelte';
   import Icon from './components/Icon.svelte';
   import PowerSheet from './components/PowerSheet.svelte';
+  import Health from './components/Health.svelte';
   import { live, connect } from './lib/live.svelte.js';
   import { toasts } from './lib/toast.svelte.js';
 
@@ -72,6 +73,7 @@
 <main>
   {#if tab === 'remote'}
     <Remote onDownload={(item) => { added = item.id; show('shelf'); }} />
+    <Health />
   {:else}
     <Shelf onPlay={() => show('remote')} openId={added} />
   {/if}
