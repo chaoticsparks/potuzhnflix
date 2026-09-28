@@ -27,19 +27,23 @@ const ACTIONS = {
 };
 
 export class TvBox extends EventEmitter {
-  // remoteUrl: address of the phone remote, shown on the TV's idle screen.
+  // remoteUrl: address of the phone remote, shown on the TV's idle screen; qrUrl(): the same by IP,
+  // for the QR code.
   // requireMount: mount point the downloads live on (the box works without it, just no films).
   // canPower: the box may shut down / reboot the machine (the Pi, not a dev PC).
-  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null, requireMount = null, canPower = false } = {}) {
+  constructor({ playerArgs = [], cacheDir, policy, remoteUrl = null, qrUrl = null, requireMount = null, canPower = false } = {}) {
     super();
     this.playerArgs = [...TV_ARGS, ...playerArgs];
     this.remoteUrl = remoteUrl;
+    this.qrUrl = qrUrl;
     this.requireMount = requireMount;
     this.canPower = canPower;
     this.tv = null;
     this.library = new Library({ dir: cacheDir, policy });
     this.library.on('changed', () => {
-      this.emit('downloads', this.library.list());
+      const list = this.library.list();
+      this.emit('downloads', list);
+      this.#updateTv(list);   // the idle screen shows what is downloading
       this.#changed();
     });
     this.library.on('error', (err) => this.emit('error', err));
@@ -268,7 +272,7 @@ export class TvBox extends EventEmitter {
   async #ensurePlayer() {
     if (this.player) return this.player;
     const player = new MpvPlayer({ extraArgs: this.playerArgs });
-    const tv = new TvScreen(player, { remoteUrl: this.remoteUrl });
+    const tv = new TvScreen(player, { remoteUrl: this.remoteUrl, qrUrl: this.qrUrl });
     player.on('state', () => this.#changed());
     player.on('end-file', (e) => this.#onEndFile(e));
     player.on('log', (line) => {
@@ -347,13 +351,24 @@ export class TvBox extends EventEmitter {
     this.#changed();
   }
 
-  #updateTv() {
-    this.tv?.setScene(this.poweringOff ? 'poweroff' : this.phase, {
+  #updateTv(list = this.libraryReady ? this.library.list() : []) {
+    if (!this.tv) return;
+    this.tv.setScene(this.poweringOff ? 'poweroff' : this.phase, {
       title: this.title,
       error: this.error,
       episode: this.status().episode,
       warning: this.storageError ? 'Диск з фільмами не підключено' : null,
       reboot: this.poweringOff === 'reboot',
+      // Recording to the shelf right now, fastest first; parts: "3/10" chosen episodes done
+      downloads: list
+        .filter((d) => d.state === 'downloading' && !d.playing)
+        .sort((a, b) => b.downloadSpeed - a.downloadSpeed)
+        .map((d) => ({
+          title: d.title,
+          progress: d.progress,
+          speed: d.downloadSpeed,
+          parts: d.files.length > 1 ? `${d.wantedDone}/${d.wantedCount}` : null,
+        })),
     });
   }
 

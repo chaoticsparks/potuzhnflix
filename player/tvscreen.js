@@ -3,6 +3,7 @@
 // (▶ PLAY, ❚❚ PAUSE, seek counter, volume bar, buffering).
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import qrcode from 'qrcode-generator';
 
 const FONTS_DIR = fileURLToPath(new URL('./fonts', import.meta.url));   // made by scripts/tv-fonts.mjs
 const FONT = 'Press Start 2P';
@@ -27,11 +28,21 @@ const PALE = 'c9d6ff';
 const GREEN = '98ff4f';
 const YELLOW = 'ffd23a';
 const SHADOW = '0a1a66';
+const REC_RED = 'ff2a1f';
+// QR: dark on light (phones read inverted codes poorly); not pure white, it sits on the TV for hours
+const QR_PAPER = 'e4eaff';
+const QR_INK = '0a1a66';
+const QR_MODULE = 8;       // px per module: 25 modules + quiet zone ≈ 250 px, scannable from the sofa
+const BLOCK_W = 960;       // width of the idle screen's QR + downloads block
+const MAX_TV_DOWNLOADS = 3;
 
 export class TvScreen {
-  constructor(player, { remoteUrl = null } = {}) {
+  // remoteUrl: shown as text (e.g. http://tvbox.local); qrUrl(): what the QR code opens — the IP
+  // address, since many Android phones can't resolve .local names
+  constructor(player, { remoteUrl = null, qrUrl = null } = {}) {
     this.player = player;
     this.remoteUrl = remoteUrl;
+    this.qrUrl = qrUrl;
     this.width = 1920;
     this.scene = 'idle';        // idle | loading | error | playing
     this.info = {};             // { title, error, episode: { index, count } }
@@ -174,13 +185,7 @@ export class TvScreen {
       out.push(text(cx, cy - 30, 5, 52, WHITE, reboot ? 'ПЕРЕЗАВАНТАЖУЮСЬ' : 'ВИМИКАЮСЬ', '...', Math.floor(now / 400) % 4));
       out.push(text(cx, cy + 60, 5, 26, PALE, reboot ? 'ПУЛЬТ ПІДКЛЮЧИТЬСЯ САМ' : 'ДО ЗУСТРІЧІ!'));
     } else if (this.scene === 'idle') {
-      out.push(text(cx, cy - 40, 5, 64, WHITE, 'ВСТАВТЕ КАСЕТУ', '_', blink ? 1 : 0));
-      if (this.remoteUrl) {
-        out.push(text(cx, cy + 80, 5, 24, PALE, 'ПУЛЬТ НА ТЕЛЕФОНІ:'));
-        out.push(text(cx, cy + 130, 5, 30, WHITE, this.remoteUrl));
-      }
-      // e.g. the downloads' disk is missing: the box works, but can't play anything
-      if (this.info.warning) out.push(text(cx, cy + 220, 5, 28, YELLOW, `! ${this.info.warning}`));
+      out.push(...this.#idle(cx, cy, dy, blink));
     } else if (this.scene === 'error') {
       out.push(text(cx, cy - 90, 5, 52, WHITE, 'КАСЕТУ НЕ ПРОЧИТАНО', '_', blink ? 1 : 0));
       wrap(humanError(this.info.error ?? ''), 44).slice(0, 3).forEach((line, i) => {
@@ -193,6 +198,50 @@ export class TvScreen {
       if (title) out.push(text(cx, cy + 60, 5, 26, PALE, clip(title, 52)));
     }
     return out.join('\n');
+  }
+
+  // "Insert a tape": a QR code with the remote's address, and what is recording to the shelf
+  #idle(cx, cy, dy, blink) {
+    const out = [text(cx, cy - 250, 5, 60, WHITE, 'ВСТАВТЕ КАСЕТУ', '_', blink ? 1 : 0)];
+    const left = Math.round(cx - BLOCK_W / 2);   // whole pixels keep the QR modules sharp
+    let y = Math.round(cy - 150);
+
+    if (this.remoteUrl) {
+      const target = this.qrUrl?.() ?? this.remoteUrl;
+      const qr = qrCode(target);
+      out.push(box(left, y, qr.size, qr.size, QR_PAPER));
+      out.push(`{\\an7\\pos(${left},${y})\\bord0\\shad0\\1c${c(QR_INK)}\\p1}${qr.path}{\\p0}`);
+      const tx = left + qr.size + 56;
+      // The address must fit beside the code; an IP with a port is longer than tvbox.local
+      const urlSize = Math.min(30, Math.floor((BLOCK_W - qr.size - 56) / this.remoteUrl.length));
+      out.push(text(tx, y + 30, 7, 24, PALE, 'ПУЛЬТ НА ТЕЛЕФОНІ:'));
+      out.push(text(tx, y + 80, 7, urlSize, WHITE, this.remoteUrl));
+      if (target !== this.remoteUrl) out.push(text(tx, y + 122, 7, 20, PALE, `АБО ${new URL(target).host}`));
+      out.push(text(tx, y + 172, 7, 20, PALE, 'НАВЕДІТЬ КАМЕРУ'));
+      out.push(text(tx, y + 207, 7, 20, PALE, 'ТЕЛЕФОНА НА КОД'));
+      y += qr.size + 60;
+    }
+
+    // Downloads in progress, like a VCR recording: blinking red REC dot
+    const downloads = this.info.downloads ?? [];
+    if (downloads.length) {
+      if (blink) out.push(box(left, y + 2, 20, 20, REC_RED));
+      out.push(text(left + 36, y, 7, 24, WHITE, 'ЗАПИС НА ПОЛИЦЮ'));
+      downloads.slice(0, MAX_TV_DOWNLOADS).forEach((d, i) => {
+        const ly = y + 52 + i * 44;
+        const name = d.parts ? `${prettyName(d.title)} ${d.parts}` : prettyName(d.title);
+        out.push(text(left, ly, 7, 22, PALE, clip(name, 28)));
+        out.push(text(left + BLOCK_W - 230, ly, 9, 22, WHITE, `${Math.floor(d.progress * 100)}%`));
+        out.push(text(left + BLOCK_W, ly, 9, 22, WHITE, `${(d.speed / 1024 ** 2).toFixed(1)} МБ/С`));
+      });
+      if (downloads.length > MAX_TV_DOWNLOADS) {
+        out.push(text(left, y + 52 + MAX_TV_DOWNLOADS * 44, 7, 20, PALE, `+${downloads.length - MAX_TV_DOWNLOADS} ЩЕ`));
+      }
+    }
+
+    // e.g. the downloads' disk is missing: the box works, but can't play anything
+    if (this.info.warning) out.push(text(cx, H - MARGIN + dy, 2, 28, YELLOW, `! ${this.info.warning}`));
+    return out;
   }
 
   // Messages over the film, like a VCR
@@ -289,6 +338,35 @@ const ICONS = {
 function vcrLabel(x, y, icon, label) {
   const iconW = icon === 'ff' || icon === 'rew' ? 60 : 40;
   return [shape(x, y, WHITE, ICONS[icon]), text(x + iconW + 28, y - 2, 7, 44, WHITE, label)];
+}
+
+// QR code as one ASS drawing: dark modules merged into horizontal runs, 3-module quiet zone.
+// Built once per address.
+const qrCache = new Map();
+function qrCode(url) {
+  if (qrCache.has(url)) return qrCache.get(url);
+  const q = qrcode(0, 'M');
+  q.addData(url);
+  q.make();
+  const n = q.getModuleCount();
+  const quiet = 3;
+  let path = '';
+  for (let r = 0; r < n; r++) {
+    for (let col = 0; col < n;) {
+      if (!q.isDark(r, col)) { col++; continue; }
+      let end = col;
+      while (end < n && q.isDark(r, end)) end++;
+      const x0 = (col + quiet) * QR_MODULE;
+      const x1 = (end + quiet) * QR_MODULE;
+      const y0 = (r + quiet) * QR_MODULE;
+      const y1 = y0 + QR_MODULE;
+      path += `m ${x0} ${y0} l ${x1} ${y0} ${x1} ${y1} ${x0} ${y1} `;
+      col = end;
+    }
+  }
+  const qr = { size: (n + 2 * quiet) * QR_MODULE, path };
+  qrCache.set(url, qr);
+  return qr;
 }
 
 // ---- Text helpers ----

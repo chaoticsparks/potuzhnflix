@@ -13,8 +13,20 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 const STATUS_INTERVAL_MS = 250;      // mpv reports time-pos many times a second; phones get ≤ 4 updates/s
 const DOWNLOADS_INTERVAL_MS = 1000;
 
-// Shown on the TV's idle screen; on the Pi this will be http://tvbox.local (set TVBOX_URL)
-const REMOTE_URL = process.env.TVBOX_URL ?? `http://${lanAddresses()[0] ?? 'localhost'}:${PORT}`;
+// The remote's address by IP: always reachable, unlike tvbox.local (many Android phones can't
+// resolve .local). Goes into the TV's QR code; re-read every 30 s (DHCP, cable plugged/unplugged).
+let ipUrl = null;
+let ipUrlAt = 0;
+function lanUrl() {
+  if (Date.now() - ipUrlAt > 30000) {
+    ipUrl = `http://${lanAddresses()[0] ?? 'localhost'}${PORT === 80 ? '' : `:${PORT}`}`;
+    ipUrlAt = Date.now();
+  }
+  return ipUrl;
+}
+
+// Shown as text on the TV's idle screen; on the Pi http://tvbox.local (TVBOX_URL)
+const REMOTE_URL = process.env.TVBOX_URL ?? lanUrl();
 
 // Extra mpv options, space-separated, e.g. TVBOX_MPV_ARGS="--geometry=960x540+40+40"
 const EXTRA_MPV_ARGS = (process.env.TVBOX_MPV_ARGS ?? '').split(/\s+/).filter(Boolean);
@@ -24,6 +36,7 @@ const ON_PI = process.argv.includes('--pi');
 const box = new TvBox({
   playerArgs: [...(ON_PI ? PI_ARGS : []), ...EXTRA_MPV_ARGS],
   remoteUrl: REMOTE_URL,
+  qrUrl: lanUrl,
   // Set by deploy/use-disk.sh: the box starts without the disk and mounts it when it can
   requireMount: process.env.TVBOX_REQUIRE_MOUNT || null,
   canPower: ON_PI,
