@@ -38,7 +38,7 @@
 </script>
 
 <header class="top">
-  <img class="mark" src="/mark.png" alt="" width="200" height="161" />
+  <img class="mark" src="/mark.png" alt="" width="240" height="76" />
   <h1 class="wordmark"><span class="potuzhn">Потужн</span><span class="flix">FLIX</span></h1>
   <span class="link tiny" class:on={live.connected} role="status">
     <i></i>{live.connected ? 'Online' : 'Offline'}
@@ -104,31 +104,47 @@
     padding: calc(env(safe-area-inset-top) + 8px) var(--gutter) calc(env(safe-area-inset-bottom) + 96px);
   }
 
-  .top { display: flex; align-items: center; gap: 10px; padding: 4px 0 12px; }
-  .mark { width: 52px; height: auto; flex: none; }
+  .top { display: flex; align-items: center; gap: 10px; padding: 4px 0 14px; }
+  .mark { width: 76px; height: auto; flex: none; border-radius: 3px; filter: drop-shadow(0 0 8px rgb(76 125 255 / 0.45)); }
   .wordmark {
+    position: relative;
     margin: 0;
     flex: 1;
     font-family: var(--f-head);
     font-weight: 400;
     font-style: italic;
-    font-size: 27px;
+    font-size: 25px;
     letter-spacing: -0.01em;
     white-space: nowrap;
+    filter: drop-shadow(0 0 6px rgb(76 125 255 / 0.5));
+  }
+  /* The red swoosh under the logo's lettering */
+  .wordmark::after {
+    content: '';
+    position: absolute;
+    left: 4%;
+    right: 26%;
+    bottom: -3px;
+    height: 3px;
+    border-radius: 50%;
+    background: linear-gradient(90deg, transparent, var(--flix) 35%, #ff6a4a);
+    transform: rotate(-2deg);
+    transform-origin: left;
   }
   /* Chrome lettering like the logo */
   .potuzhn {
-    background: linear-gradient(180deg, #ffffff 0%, #dfe4ea 45%, #8d96a3 52%, #c9d0d8 75%, #f2f5f8 100%);
+    background: linear-gradient(180deg, #ffffff 0%, #e6e9f7 42%, #8f94b4 52%, #cfd4ea 78%, #f6f7fd 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    -webkit-text-stroke: 0.5px #2a3342;
-    filter: drop-shadow(0 2px 0 #0d1320);
+    -webkit-text-stroke: 0.5px #1c2146;
   }
   .flix {
-    color: var(--flix);
-    font-family: var(--f-head);
-    filter: drop-shadow(0 2px 0 #3b0605);
+    background: linear-gradient(180deg, #ff6a55 0%, var(--flix) 55%, #b3120d 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-stroke: 0.5px #4a0503;
   }
 
   .power { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; flex: none; color: var(--flix); }
@@ -153,7 +169,7 @@
 
   .link { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 7px; }
   .link i { width: 8px; height: 8px; border-radius: 50%; background: var(--flix); box-shadow: 0 0 6px var(--flix); }
-  .link.on i { background: var(--lcd); box-shadow: 0 0 6px var(--lcd); }
+  .link.on i { background: var(--vfd); box-shadow: 0 0 6px var(--vfd); }
 
   .offline {
     margin: 0 0 12px;
@@ -194,10 +210,11 @@
     margin: 0;
     padding: 10px 12px;
     font-family: var(--f-pixel);
-    font-size: 15px;
-    color: var(--lcd);
-    background: var(--lcd-bg);
-    border: 2px solid var(--lcd-mid);
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--vfd);
+    background: var(--vfd-bg);
+    border: 2px solid var(--vfd-mid);
     border-radius: 4px;
     box-shadow: 0 6px 18px rgb(0 0 0 / 0.6);
   }

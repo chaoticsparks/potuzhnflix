@@ -1,5 +1,6 @@
 <script>
-  // The remote: a Winamp-style player window with an LCD, plus the "insert a tape" screen when idle
+  // The remote: the front panel of a Y2K VHS recorder (tape slot, cyan VFD, piano keys),
+  // plus a little CRT TV with the blue "insert a tape" screen when nothing plays
   import Icon from './Icon.svelte';
   import MagnetForm from './MagnetForm.svelte';
   import TrackSheet from './TrackSheet.svelte';
@@ -17,6 +18,7 @@
   const ep = $derived(s?.episode);
   const item = $derived(s?.itemId ? live.downloads.find((d) => d.id === s.itemId) : null);
   const file = $derived(item?.files[ep?.index ?? 0] ?? null);
+  const tapeIn = $derived(phase === 'playing' || phase === 'loading');
 
   // --- Seek: while the finger is on the slider, show its position instead of mpv's ---
   let seeking = $state(false);
@@ -76,7 +78,7 @@
     }
   }
 
-  // --- LCD ---
+  // --- VFD ---
   let showRemaining = $state(false);
   const counter = $derived(showRemaining && duration ? `-${clock(duration - position)}` : clock(position));
   const word = $derived(
@@ -87,17 +89,16 @@
       : p?.paused ? 'PAUS'
       : 'PLAY',
   );
-  const running = $derived(phase === 'playing' && !p?.paused && !p?.buffering);
   const marquee = $derived(
     phase === 'loading' ? `Шукаю пірів і дані торрента…${s?.title ? ` · ${prettyName(s.title)}` : ''}`
       : phase === 'error' ? `Помилка: ${s?.error}`
       : phase === 'playing' ? `${prettyName(s?.title ?? '')}${ep ? ` · ${ep.index + 1}/${ep.count} · ${prettyName(ep.name)}` : ''}`
-      : 'Вставте касету — додайте magnet-посилання',
+      : 'Вставте касету — додайте magnet-посилання або .torrent',
   );
-  // Unlit segments behind the digits, like a real LCD
+  // Unlit segments behind the digits, like a real display
   const ghost = (text, full) => text.replace(/[^:.]/g, full);
 
-  // Winamp-style scrolling title, only when it doesn't fit
+  // Scrolling title, only when it doesn't fit
   let boxWidth = $state(0);
   let textWidth = $state(0);
   const scroll = $derived(textWidth > boxWidth);
@@ -120,18 +121,35 @@
   }
 </script>
 
-<section class="player panel" aria-label="Плеєр">
-  <div class="titlebar">ПотужнFLIX</div>
+<section class="deck panel" aria-label="Відеомагнітофон">
+  <div class="titlebar">
+    <span class="brand"><span class="brand-p">Потужн</span><span class="brand-f">FLIX</span></span>
+    <span>VHS · HQ · Hi-Fi Stereo</span>
+    <span class="led" class:on={phase === 'playing' && !p?.paused} aria-hidden="true"></span>
+  </div>
 
-  <div class="lcd screen">
+  <!-- Cassette slot: the playing tape sticks out with its handwritten label -->
+  <div class="slot" class:loaded={tapeIn}>
+    {#if tapeIn}
+      <div class="tape-edge">
+        <span class="tape-label">{prettyName(s?.title ?? '') || '…'}</span>
+      </div>
+    {:else}
+      <span class="flap tiny">Вставте касету</span>
+    {/if}
+  </div>
+
+  <div class="vfd screen">
     <div class="row top">
       <span class="seg14 word" aria-label={word}>
         <span class="off" aria-hidden="true">{ghost(word, '~')}</span>
         <span class="on">{word}</span>
       </span>
-      {#if ep}
-        <span class="tiny episode">СЕР {String(ep.index + 1).padStart(2, '0')}/{String(ep.count).padStart(2, '0')}</span>
-      {/if}
+      <span class="marks tiny" aria-hidden="true">
+        <span class:lit={tapeIn}>VHS</span>
+        <span class:lit={tapeIn}>HQ</span>
+        <span class:lit={phase === 'playing'}>Hi-Fi</span>
+      </span>
     </div>
 
     <button class="counter" onclick={() => (showRemaining = !showRemaining)} disabled={!p}
@@ -149,11 +167,9 @@
       </span>
     </div>
 
-    <div class="row bottom">
-      <div class="eq" class:run={running} class:idle={phase !== 'playing'} aria-hidden="true">
-        {#each { length: 14 } as _, i}<i style="--d: {(i * 137) % 900}ms; --h: {30 + ((i * 53) % 70)}%"></i>{/each}
-      </div>
-      <span class="tiny stats">
+    <div class="row bottom tiny">
+      <span>{#if ep}СЕР {String(ep.index + 1).padStart(2, '0')}/{String(ep.count).padStart(2, '0')}{/if}</span>
+      <span class="stats">
         {#if file?.done}
           з диска
         {:else if item && phase === 'playing'}
@@ -182,18 +198,30 @@
     <span>{duration ? clock(duration) : '--:--'}</span>
   </div>
 
-  <div class="transport">
-    <button class="chrome key" aria-label="Попередня серія" disabled={!p || !ep || ep.index === 0} onclick={() => send('prev')}><Icon name="prev" /></button>
-    <button class="chrome key" aria-label="Назад на 10 секунд" disabled={!p} onclick={() => send('seekBy', -10)}><Icon name="back" /></button>
-    <button class="chrome key big" class:hot={p && p.paused} aria-label={p?.paused ? 'Грати' : 'Пауза'} disabled={!p} onclick={() => send('toggle')}>
-      <Icon name={p && !p.paused ? 'pause' : 'play'} size={28} />
+  <!-- Piano keys of the deck -->
+  <div class="keys">
+    <button class="chrome key" disabled={!p || !ep || ep.index === 0} onclick={() => send('prev')} aria-label="Попередня серія">
+      <Icon name="prev" /><small>Попер.</small>
     </button>
-    <button class="chrome key" aria-label="Вперед на 10 секунд" disabled={!p} onclick={() => send('seekBy', 10)}><Icon name="fwd" /></button>
-    <button class="chrome key" aria-label="Наступна серія" disabled={!p || !ep || ep.index >= ep.count - 1} onclick={() => send('next')}><Icon name="next" /></button>
+    <button class="chrome key" disabled={!p} onclick={() => send('seekBy', -10)} aria-label="Назад на 10 секунд">
+      <Icon name="back" /><small>−10</small>
+    </button>
+    <button class="chrome key big" class:hot={p && p.paused} disabled={!p} onclick={() => send('toggle')} aria-label={p?.paused ? 'Грати' : 'Пауза'}>
+      <Icon name={p && !p.paused ? 'pause' : 'play'} size={26} /><small>{p && !p.paused ? 'Пауза' : 'Грати'}</small>
+    </button>
+    <button class="chrome key" disabled={!p} onclick={() => send('seekBy', 10)} aria-label="Вперед на 10 секунд">
+      <Icon name="fwd" /><small>+10</small>
+    </button>
+    <button class="chrome key" disabled={!p || !ep || ep.index >= ep.count - 1} onclick={() => send('next')} aria-label="Наступна серія">
+      <Icon name="next" /><small>Наст.</small>
+    </button>
+    <button class="chrome key eject" disabled={phase === 'idle'} onclick={stop} aria-label="Стоп — вийняти касету">
+      <Icon name="eject" /><small>Стоп</small>
+    </button>
   </div>
 
   <div class="volume">
-    <Icon name="volume" size={20} />
+    <span class="tiny vol-label">Vol</span>
     <label class="sr-only" for="volume">Гучність</label>
     <input id="volume" class="slider volume" type="range" min="0" max="100" step="1"
       value={volume} disabled={!p} style="--fill: {volume}%"
@@ -204,31 +232,33 @@
   <div class="extras">
     <button class="chrome btn small" disabled={!p} onclick={() => (sheet = 'audio')}><Icon name="audio" size={16} /> Аудіо</button>
     <button class="chrome btn small" disabled={!p} onclick={() => (sheet = 'subs')}><Icon name="subs" size={16} /> Субтитри</button>
-    <button class="chrome btn small danger" disabled={phase === 'idle'} onclick={stop}><Icon name="stop" size={16} /> Стоп</button>
   </div>
 </section>
 
-{#if phase === 'idle' || phase === 'error'}
-  <section class="vcr" aria-label="Нова касета">
-    <p class="vcr-title">▶ {phase === 'error' ? 'КАСЕТУ НЕ ПРОЧИТАНО' : 'ВСТАВТЕ КАСЕТУ'}<span class="cursor">_</span></p>
-    {#if phase === 'error'}
-      <p class="vcr-error">{s?.error}</p>
-    {/if}
-    {#if recent && phase === 'idle'}
-      <button class="chrome btn continue" onclick={resume}>
-        <Icon name="play" size={18} />
-        <span class="continue-text">
-          Продовжити «{prettyName(recent.title)}»{#if recent.files.length > 1}, серія {recent.episode + 1}{/if}
-        </span>
-      </button>
-    {/if}
-    <MagnetForm {onDownload} />
-  </section>
-{:else if phase === 'loading'}
-  <section class="vcr loading" aria-live="polite">
-    <div class="reels" aria-hidden="true"><span></span><span></span></div>
-    <p class="vcr-title">ЗАВАНТАЖУЮ КАСЕТУ<span class="cursor">_</span></p>
-    <button class="chrome btn" onclick={stop}>Скасувати</button>
+{#if phase === 'idle' || phase === 'error' || phase === 'loading'}
+  <!-- A small CRT TV showing the VCR's blue screen -->
+  <section class="tv" aria-label={phase === 'loading' ? 'Завантаження' : 'Нова касета'} aria-live="polite">
+    <div class="crt">
+      {#if phase === 'loading'}
+        <p class="vcr-title">▶ ЗАВАНТАЖУЮ КАСЕТУ<span class="cursor">_</span></p>
+        <button class="chrome btn" onclick={stop}>Скасувати</button>
+      {:else}
+        <p class="vcr-title">▶ {phase === 'error' ? 'КАСЕТУ НЕ ПРОЧИТАНО' : 'ВСТАВТЕ КАСЕТУ'}<span class="cursor">_</span></p>
+        {#if phase === 'error'}
+          <p class="vcr-error">{s?.error}</p>
+        {/if}
+        {#if recent && phase === 'idle'}
+          <button class="chrome btn continue" onclick={resume}>
+            <Icon name="play" size={18} />
+            <span class="continue-text">
+              Продовжити «{prettyName(recent.title)}»{#if recent.files.length > 1}, серія {recent.episode + 1}{/if}
+            </span>
+          </button>
+        {/if}
+        <MagnetForm {onDownload} />
+      {/if}
+    </div>
+    <div class="tv-chin tiny" aria-hidden="true"><span>ПотужнFLIX</span><span class="tv-led"></span></div>
   </section>
 {/if}
 
@@ -237,92 +267,112 @@
 {/if}
 
 <style>
-  .player { padding: 2px 12px 14px; display: grid; gap: 10px; }
+  .deck { padding: 2px 12px 14px; display: grid; gap: 12px; }
   /* Grid items default to min-width: auto, and the long marquee line would widen everything */
-  .player > *, .screen > *, .vcr > * { min-width: 0; }
+  .deck > *, .screen > *, .crt > * { min-width: 0; }
 
-  /* ----- LCD ----- */
+  /* Printed strip: brand, format badges, PLAY LED */
+  .brand { font-family: var(--f-head); font-size: 13px; font-style: italic; letter-spacing: 0; text-transform: none; }
+  .brand-p { color: var(--chrome-2); }
+  .brand-f { color: var(--flix); }
+  .led { width: 9px; height: 9px; border-radius: 50%; background: #1f3325; box-shadow: inset 0 1px 2px #000; }
+  .led.on { background: #5cff7a; box-shadow: 0 0 8px #5cff7a; }
+
+  /* Cassette slot with its hinged flap */
+  .slot {
+    position: relative;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    background:
+      repeating-linear-gradient(180deg, rgb(255 255 255 / 0.03) 0 1px, transparent 1px 4px),
+      linear-gradient(180deg, #050507, #16161f);
+    border-radius: 6px;
+    box-shadow: inset 0 3px 8px #000, 0 1px 0 rgb(255 255 255 / 0.08);
+    overflow: hidden;
+  }
+  .flap { color: var(--chrome-4); letter-spacing: 0.18em; text-shadow: 0 1px 0 #000; }
+  .tape-edge {
+    position: absolute;
+    inset: 6px 10% auto;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(180deg, #2a2a33, var(--tape));
+    border-radius: 3px 3px 0 0;
+    box-shadow: 0 -1px 0 rgb(255 255 255 / 0.15), 0 4px 8px #000;
+    animation: insert 500ms ease-out;
+  }
+  .tape-label {
+    max-width: 88%;
+    padding: 1px 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--f-hand);
+    font-weight: 700;
+    font-size: 19px;
+    line-height: 1.2;
+    color: var(--paper-ink);
+    background: linear-gradient(180deg, #fbf6e7, var(--paper));
+    border-left: 6px solid var(--flix);
+    border-radius: 2px;
+  }
+  @keyframes insert { from { transform: translateY(-40px); opacity: 0; } }
+
+  /* ----- VFD ----- */
   .screen { padding: 10px 12px 8px; display: grid; gap: 6px; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; position: relative; z-index: 1; }
   .seg14, .seg7 { position: relative; display: inline-block; }
-  .seg14 .off, .seg7 .off { position: absolute; right: 0; color: var(--lcd-off); text-shadow: none; }
+  .seg14 .off, .seg7 .off { position: absolute; right: 0; color: var(--vfd-off); text-shadow: none; }
   .seg14 .on, .seg7 .on { position: relative; }
   .word { font-family: var(--f-seg14); font-size: 18px; }
-  .episode { color: var(--lcd); }
+  .marks { display: flex; gap: 8px; font-size: 8px; }
+  .marks span { color: var(--vfd-off); text-shadow: none; border: 1px solid currentColor; padding: 2px 4px; border-radius: 2px; }
+  .marks span.lit { color: var(--vfd); box-shadow: 0 0 6px rgb(98 246 255 / 0.4); }
 
-  .counter {
-    justify-self: end;
-    padding: 0;
-    background: none;
-    border: 0;
-    color: inherit;
-    position: relative;
-    z-index: 1;
-  }
+  .counter { justify-self: end; padding: 0; background: none; border: 0; color: inherit; position: relative; z-index: 1; }
   .counter:disabled { cursor: default; }
   .seg7 { font-family: var(--f-seg7); font-size: clamp(34px, 12vw, 48px); letter-spacing: 0.02em; }
 
-  .marquee { overflow: hidden; white-space: nowrap; font-size: 17px; text-transform: uppercase; position: relative; z-index: 1; }
+  .marquee { overflow: hidden; white-space: nowrap; font-size: 13px; line-height: 1.6; text-transform: uppercase; position: relative; z-index: 1; }
   .track { display: inline-flex; gap: 48px; }
   .track.run { animation: marquee var(--dur) linear infinite; }
   @keyframes marquee { to { transform: translateX(var(--shift)); } }
 
-  .bottom { min-height: 22px; }
-  .stats { color: var(--lcd); text-align: right; }
+  .bottom { min-height: 18px; font-size: 8px; }
+  .stats { text-align: right; }
 
-  /* Equalizer bars from the logo */
-  .eq { display: flex; align-items: flex-end; gap: 2px; height: 20px; }
-  .eq i {
-    width: 5px;
-    height: var(--h);
-    background: repeating-linear-gradient(0deg, var(--lcd) 0 3px, transparent 3px 4px);
-    opacity: 0.9;
-  }
-  .eq.run i { animation: bounce 700ms ease-in-out var(--d) infinite alternate; }
-  .eq.idle i { height: 15%; opacity: 0.35; }
-  @keyframes bounce { from { height: 12%; } to { height: var(--h); } }
+  .times { display: flex; justify-content: space-between; margin-top: -8px; }
 
-  .times { display: flex; justify-content: space-between; margin-top: -6px; }
-
-  /* ----- Buttons ----- */
-  .transport { display: grid; grid-template-columns: 1fr 1fr 1.4fr 1fr 1fr; gap: 8px; align-items: stretch; }
-  .key { display: grid; place-items: center; min-height: 56px; padding: 0; }
-  .key.big { min-height: 64px; }
-  .key.hot { color: #2a1400; background: linear-gradient(180deg, var(--bolt-hi), var(--bolt)); }
-
-  .volume { display: flex; align-items: center; gap: 10px; color: var(--chrome-2); }
-  .vol-num { width: 3ch; text-align: right; color: var(--chrome-2); }
-
-  .extras { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-
-  /* ----- VCR blue screen ----- */
-  .vcr {
-    margin-top: 16px;
-    padding: 16px var(--gutter) 18px;
+  /* ----- Piano keys ----- */
+  .keys { display: grid; grid-template-columns: 1fr 1fr 1.35fr 1fr 1fr 1fr; gap: 6px; }
+  .key {
     display: grid;
-    gap: 14px;
-    background:
-      repeating-linear-gradient(180deg, rgb(255 255 255 / 0.035) 0 1px, transparent 1px 3px),
-      linear-gradient(180deg, #1d44d6, var(--vcr) 60%, #102a96);
-    border-radius: 10px;
-    border: 2px solid #0a1a66;
-    box-shadow: inset 0 0 40px rgb(0 0 30 / 0.6);
+    justify-items: center;
+    align-content: center;
+    gap: 3px;
+    min-height: 60px;
+    padding: 6px 0 4px;
+    border-radius: 4px 4px 7px 7px;
   }
-  .vcr-title { margin: 0; font-family: var(--f-tiny); font-size: 13px; line-height: 1.6; color: #fff; text-shadow: 2px 2px 0 #0a1a66; }
-  .vcr-error { margin: 0; color: #ffd0cc; }
-  .cursor { animation: blink 1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
+  .key small { font-family: var(--f-tiny); font-size: 7px; text-transform: uppercase; color: var(--chrome-5); }
+  .key.big { min-height: 64px; }
+  .key.hot {
+    color: #fff;
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.45) 0%, rgb(255 255 255 / 0) 50%),
+      linear-gradient(90deg, var(--hot-a), var(--hot-b));
+  }
+  .key.hot small { color: #fff; }
+  .key.eject { color: #b3160f; }
+
+  .volume { display: flex; align-items: center; gap: 10px; }
+  .vol-label, .vol-num { color: var(--chrome-3); font-size: 8px; }
+  .vol-num { width: 3ch; text-align: right; }
+
+  .extras { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
   .continue { justify-content: flex-start; text-align: left; white-space: normal; }
   .continue-text { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-
-  .loading { justify-items: center; text-align: center; }
-  .reels { display: flex; gap: 40px; }
-  .reels span {
-    width: 44px; height: 44px; border-radius: 50%;
-    background: radial-gradient(circle, #fff 0 5px, transparent 6px), conic-gradient(#fff 0 30deg, transparent 30deg 120deg, #fff 120deg 150deg, transparent 150deg 240deg, #fff 240deg 270deg, transparent 270deg);
-    border: 3px solid #fff;
-    animation: spin 1.6s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

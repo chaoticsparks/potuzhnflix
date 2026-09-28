@@ -126,13 +126,13 @@
     padding: 10px 12px;
     font-family: var(--f-pixel);
     font-size: 16px;   /* ≥ 16px: iOS doesn't zoom on focus */
-    color: var(--lcd);
-    background: var(--lcd-bg);
+    color: var(--vfd);
+    background: var(--vfd-bg);
     border: 2px solid;
     border-color: #000 #5b6371 #5b6371 #000;
     border-radius: 4px;
     box-shadow: inset 0 0 10px rgb(0 0 0 / 0.8);
-    caret-color: var(--lcd);
+    caret-color: var(--vfd);
   }
   .field::placeholder { color: #3d6b2c; }
   .pick { justify-self: start; }
@@ -146,18 +146,19 @@
     min-height: 48px;
     padding: 0 0 0 12px;
     font-family: var(--f-pixel);
-    color: var(--lcd);
-    background: var(--lcd-bg);
+    font-size: 11px;
+    color: var(--vfd);
+    background: var(--vfd-bg);
     border: 2px solid;
     border-color: #000 #5b6371 #5b6371 #000;
     border-radius: 4px;
   }
   .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file-size { color: var(--lcd-mid); }
+  .file-size { color: var(--vfd-mid); }
   .remove {
     align-self: stretch;
     font-size: 18px;
-    color: var(--lcd);
+    color: var(--vfd);
     background: none;
     border: 0;
     border-left: 1px solid #1d2a1a;

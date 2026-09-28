@@ -70,9 +70,9 @@
     return { text: 'REC', kind: 'rec' };
   });
 
-  // Reel radii in the tape window (SVG units)
-  const R_MIN = 9;
-  const R_MAX = 19;
+  // Reel radii (SVG units): tape moves from the left reel to the right one as it downloads
+  const R_MIN = 13;
+  const R_MAX = 29;
   const left = $derived(R_MIN + (1 - item.progress) * (R_MAX - R_MIN));
   const right = $derived(R_MIN + item.progress * (R_MAX - R_MIN));
 
@@ -102,30 +102,37 @@
     <span>{item.keep ? 'Захищено' : 'Не стирати'}</span>
   </button>
 
-  <div class="label">
-    <h3>{prettyName(item.title)}</h3>
-    <p class="meta tiny">
-      {#if series}{item.files.length} {plural(item.files.length, 'серія', 'серії', 'серій')} · {/if}{size(item.length)}
-    </p>
+  <!-- The cassette, like the one in the logo: VHS / HQ badges, a reel on each side of the label -->
+  <div class="shell">
+    <div class="badges tiny" aria-hidden="true"><span>VHS</span><span>HQ</span></div>
+    <div class="body">
+      {#snippet reel(r)}
+        <svg class="reel" class:spin={recording || item.playing} viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="32" cy="32" r="30" class="well" />
+          <circle cx="32" cy="32" r={r} class="spool" />
+          <g class="hub">
+            <circle cx="32" cy="32" r="11" />
+            {#each [0, 60, 120, 180, 240, 300] as a}
+              <rect x="31" y="21" width="2" height="7" transform="rotate({a} 32 32)" />
+            {/each}
+          </g>
+        </svg>
+      {/snippet}
+      {@render reel(left)}
+      <div class="label">
+        <h3>{prettyName(item.title)}</h3>
+        <p class="meta tiny">
+          {#if series}{item.files.length} {plural(item.files.length, 'серія', 'серії', 'серій')} · {/if}{size(item.length)}
+        </p>
+      </div>
+      {@render reel(right)}
+    </div>
   </div>
 
-  <div class="window-row">
-    <svg class="window" viewBox="0 0 160 48" aria-hidden="true">
-      <rect x="1" y="1" width="158" height="46" rx="6" class="glass" />
-      <g class="reel" class:spin={recording || item.playing}>
-        <circle cx="40" cy="24" r={left} class="spool" />
-        <g class="hub" style="transform-origin: 40px 24px"><circle cx="40" cy="24" r="6" /><path d="M40 18v12M34 24h12" /></g>
-      </g>
-      <g class="reel" class:spin={recording || item.playing}>
-        <circle cx="120" cy="24" r={right} class="spool" />
-        <g class="hub" style="transform-origin: 120px 24px"><circle cx="120" cy="24" r="6" /><path d="M120 18v12M114 24h12" /></g>
-      </g>
-    </svg>
-    <div class="state">
-      <span class="sticker {sticker.kind}">{sticker.text}</span>
-      <span class="tiny pct">{percent(item.progress)}</span>
-      {#if recording}<span class="tiny muted">{speed(item.downloadSpeed)}</span>{/if}
-    </div>
+  <div class="state">
+    <span class="sticker {sticker.kind}">{sticker.text}</span>
+    <span class="tiny pct">{percent(item.progress)}</span>
+    {#if recording}<span class="tiny muted">{speed(item.downloadSpeed)}</span>{/if}
   </div>
 
   {#if plan}<p class="plan" class:none={wantedCount === 0}>{plan}</p>{/if}
@@ -200,20 +207,20 @@
 <style>
   .tape {
     position: relative;
-    padding: 22px 12px 12px;
+    padding: 26px 12px 12px;
     display: grid;
     gap: 10px;
     color: var(--text);
-    /* Black cassette plastic with moulded ridges */
-    background:
-      repeating-linear-gradient(90deg, rgb(255 255 255 / 0.025) 0 2px, transparent 2px 6px),
-      linear-gradient(180deg, #202125, var(--tape) 30%, #0a0a0b);
-    border: 1px solid #2c2d32;
-    border-radius: 8px;
-    box-shadow: 0 8px 20px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.06);
+    background: linear-gradient(180deg, #1b1b25, #0e0e14);
+    border: 1px solid #2c2d3c;
+    border-radius: 10px;
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.06);
     scroll-margin-top: 12px;
   }
-  .tape.playing { border-color: var(--bolt); box-shadow: 0 0 0 1px var(--bolt), 0 8px 24px rgb(255 148 22 / 0.25); }
+  .tape.playing {
+    border-color: var(--magenta);
+    box-shadow: 0 0 0 1px var(--magenta), 0 0 24px rgb(255 63 180 / 0.35), 0 10px 24px rgb(0 0 0 / 0.55);
+  }
 
   /* Record-protect tab */
   .tab {
@@ -229,44 +236,64 @@
     font-size: 8px;
     text-transform: uppercase;
     color: var(--muted);
-    background: #1b1c20;
-    border: 1px solid #34363c;
+    background: #1b1c26;
+    border: 1px solid #34364a;
     border-top: 0;
     border-radius: 0 0 5px 5px;
+    z-index: 1;
   }
   .tab.kept { color: #fff; background: var(--flix); border-color: #ff6a5e; }
 
+  /* The cassette shell: textured black plastic, notched corners, embossed VHS / HQ */
+  .shell {
+    padding: 8px 10px 10px;
+    background:
+      radial-gradient(circle at 20% 30%, rgb(255 255 255 / 0.03) 0 1px, transparent 1px) 0 0 / 5px 5px,
+      linear-gradient(180deg, #2a2a35, #121218 60%, #0b0b10);
+    border: 1px solid #3c3d52;
+    border-radius: 6px;
+    clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%, 0 10px);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12);
+  }
+  .badges { display: flex; justify-content: space-between; margin: 0 4px 6px; font-size: 8px; }
+  .badges span { color: #8d8fa8; padding: 2px 4px; border: 1px solid #55576e; border-radius: 2px; }
+  .body { display: grid; grid-template-columns: 56px minmax(0, 1fr) 56px; gap: 8px; align-items: center; }
+
+  .reel { width: 56px; height: 56px; }
+  .well { fill: #06060a; stroke: #33344a; stroke-width: 1; }
+  /* Tape wound on the reel: dark with the logo's purple sheen */
+  .spool { fill: #1b1328; stroke: #6a4bb0; stroke-width: 0.8; transition: r 600ms ease; }
+  .hub circle { fill: #d7dae6; }
+  .hub rect { fill: #6d7189; }
+  .hub { transform-origin: 32px 32px; }
+  .reel.spin .hub { animation: spin 1.4s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   /* Paper label with a handwritten title */
   .label {
-    padding: 8px 12px 6px;
+    align-self: stretch;
+    display: grid;
+    align-content: center;
+    padding: 6px 10px;
     color: var(--paper-ink);
     background:
-      repeating-linear-gradient(180deg, transparent 0 21px, rgb(31 42 107 / 0.18) 21px 22px),
+      repeating-linear-gradient(180deg, transparent 0 21px, rgb(31 42 107 / 0.16) 21px 22px),
       linear-gradient(180deg, #fbf6e7, var(--paper));
     border-radius: 3px;
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08), 0 1px 0 rgb(255 255 255 / 0.1);
-    border-left: 8px solid var(--flix);
+    border-top: 5px solid var(--flix);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
   }
   h3 {
     margin: 0;
     font-family: var(--f-hand);
     font-weight: 700;
-    font-size: 26px;
+    font-size: 24px;
     line-height: 1.05;
     overflow-wrap: anywhere;
   }
   .meta { margin: 4px 0 0; color: #5a5f7a; font-size: 8px; }
 
-  .window-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
-  .window { width: 100%; max-width: 220px; height: auto; }
-  .glass { fill: #050506; stroke: #3a3b41; stroke-width: 2; }
-  .spool { fill: #3b2a1c; stroke: #20150d; stroke-width: 1; transition: r 600ms ease; }
-  .hub circle { fill: #e6e2d6; }
-  .hub path { stroke: #50473a; stroke-width: 2.5; }
-  .reel.spin .hub { animation: spin 1.4s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  .state { display: grid; justify-items: end; gap: 4px; }
+  .state { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
   .sticker {
     font-family: var(--f-tiny);
     font-size: 9px;
@@ -275,10 +302,10 @@
     text-transform: uppercase;
     white-space: nowrap;
   }
-  .sticker.rec { color: #fff; background: #3a0b0a; }
+  .sticker.rec { color: #fff; background: #3a0b12; }
   .sticker.rec::before { content: '● '; color: var(--flix); animation: blink 1s steps(1) infinite; }
-  .sticker.done { color: #0b1c05; background: var(--lcd); }
-  .sticker.play { color: #2a1400; background: var(--bolt); }
+  .sticker.done { color: #04181b; background: var(--vfd); }
+  .sticker.play { color: #fff; background: linear-gradient(90deg, var(--hot-a), var(--hot-b)); }
   .sticker.pause, .sticker.wait { color: var(--ink); background: var(--chrome-2); }
   @keyframes blink { 50% { opacity: 0; } }
   .pct { color: var(--text); }
@@ -311,11 +338,11 @@
   .ep {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 44px;
-    background: var(--lcd-bg);
+    background: var(--vfd-bg);
     border: 1px solid #1d2a1a;
     border-radius: 4px;
   }
-  .ep.current { border-color: var(--lcd-mid); box-shadow: inset 3px 0 0 var(--lcd); }
+  .ep.current { border-color: var(--vfd-mid); box-shadow: inset 3px 0 0 var(--vfd); }
   .check {
     display: grid;
     grid-template-columns: auto auto minmax(0, 1fr) auto;
@@ -325,7 +352,9 @@
     padding: 6px 8px;
     text-align: left;
     font-family: var(--f-pixel);
-    color: var(--lcd);
+    font-size: 10px;
+    line-height: 1.5;
+    color: var(--vfd);
     background: none;
     border: 0;
   }
@@ -337,8 +366,8 @@
     font-size: 14px;
     line-height: 1;
     color: #0b1c05;
-    background: var(--lcd);
-    border: 2px solid var(--lcd-mid);
+    background: var(--vfd);
+    border: 2px solid var(--vfd-mid);
     border-radius: 3px;
   }
   .ep.off .box { background: transparent; }
@@ -346,7 +375,7 @@
   .watch {
     display: grid;
     place-items: center;
-    color: var(--lcd);
+    color: var(--vfd);
     background: #0d180b;
     border: 0;
     border-left: 1px solid #1d2a1a;
@@ -354,5 +383,5 @@
   }
   .watch:disabled { opacity: 0.4; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .num, .ep-state { color: var(--lcd-mid); }
+  .num, .ep-state { color: var(--vfd-mid); }
 </style>

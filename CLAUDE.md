@@ -58,7 +58,7 @@ Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebS
 1. **Плеер (mpv).** ✅ ГОТОВО
    - Управление через IPC: пауза, громкость, перемотка, дорожки, стоп.
    - Состояние (позиция, длительность, громкость, буферизация) обновляется в реальном времени.
-   - Экран ожидания на ТВ: ✅ VHS-style blue screen + VCR OSD (see `player/tvscreen.js`).
+   - Экран ожидания на ТВ: ✅ synthwave idle scene, VCR blue screen for loading / errors, VCR OSD (see `player/tvscreen.js`).
 2. **Торрент-движок.** ✅ POC DONE (`npm run play -- "<magnet>"`, see `torrent/`, `library/`)
    - Принимает magnet-ссылку, сам выбирает, что играть: фильм, фильм из частей или серии сериала (плейлист).
    - Качает последовательно, при перемотке меняет приоритет кусков.
@@ -109,7 +109,7 @@ tvbox/
     tv-fonts.mjs      # WOFF → TTF for mpv's OSD (runs in `npm run build`), output player/fonts (git-ignored)
   player/
     player.js         # класс MpvPlayer (EventEmitter)
-    tvscreen.js       # TvScreen: the TV picture around the film (blue screen, VCR OSD), ASS via osd-overlay
+    tvscreen.js       # TvScreen: the TV picture around the film (synthwave idle, VCR blue screen, VCR OSD), ASS via osd-overlay
     cli.js            # консольный пульт для ручной проверки
   torrent/
     engine.js         # TorrentEngine: many torrents in one WebTorrent client, per-file selection, HTTP streaming
@@ -201,16 +201,16 @@ tvbox/
 
 - Svelte 5 (runes) + Vite. No service worker: browsers allow it only over HTTPS, and the box is plain HTTP on the LAN. Manifest + apple meta tags give a home-screen icon anyway.
 - State: `live.svelte.js` holds `{connected, status, downloads}` from the `/ws` socket, reconnects with backoff and on `visibilitychange`. Commands go through `api.js` (REST). No polling except `/api/storage` every 15 s on the shelf.
-- **Design: follows the logo**, 2000s nostalgia, cozy analogue:
-  - Winamp-era player window: dark metal panel, bevelled silver "chrome" buttons (the logo's transport buttons), title bar with grip stripes.
-  - Green LCD with scanlines: VCR status word in 14-segment (PLAY / PAUS / LOAD / BUFF / STOP / ERR), tape counter in 7-segment with unlit "8" segments behind, Winamp-style scrolling title, green EQ bars from the logo (animated while playing). Tap the counter → time remaining.
-  - Seek bar with the downloaded part of the current file shaded; volume bar in Winamp green → yellow → red.
-  - VCR blue screen for "insert a tape" (idle / loading / error).
+- **Design: Y2K, old and cozy VHS**, follows the logo (a VHS cassette with a synthwave sunset label, chrome "Потужн" + red "FLIX"). No Winamp (redesigned away from it: Winamp is about music, the box is about tapes).
+  - Remote = a **VCR deck** (`Remote.svelte`): black plastic panel with a printed label strip ("ПотужнFLIX · VHS · HQ · Hi-Fi Stereo", PLAY LED); a tape slot showing the playing tape's handwritten label (flap "Вставте касету" when empty); a cyan **VFD** display with a mesh: status word in 14-segment (PLAY / PAUS / LOAD / BUFF / STOP / ERR), VHS / HQ / Hi-Fi marks, tape counter in 7-segment with unlit "8" segments behind (tap → time remaining), scrolling title, episode and download stats.
+  - Glossy silver piano keys with small labels: Попер. / −10 / Грати·Пауза (sunset gradient when paused) / +10 / Наст. / ⏏ Стоп; volume fader (purple → magenta → orange); AUDIO / SUB buttons. Seek bar with the downloaded part of the current file shaded.
+  - Idle / loading / error: a small CRT TV with the VCR blue screen ("insert a tape", the new tape form, "continue").
   - New tape form (`MagnetForm`): magnet field or "Вибрати .torrent файл" (hidden `<input type=file accept=".torrent,application/x-bittorrent">`); a picked file shows as a chip (name, size, ✕) in place of the field; the client checks the extension and 10 MB. Checked with Puppeteer (`uploadFile`).
   - Series on the shelf: a summary line ("Вибрано 3 з 10 серій · 9.6 ГБ" / "Завантажуються всі серії" / "Жодна серія не вибрана"), a toggle "Серії: завантажувати N з M", "Усі" / "Жодної", and per episode a download tick (role=checkbox), state (✔ / % / —) and a separate ▶. Taps are kept locally and sent once after 0.4 s. After "На полицю" (from either tab) the app switches to the shelf and opens the new series' episode list.
-  - Shelf = VHS cassettes: handwritten paper label, tape window whose reels show progress (tape moves left → right as it downloads, hubs spin while downloading), stickers REC / ПАУЗА / ЧЕКАЄ / ГРАЄ / ЗАПИСАНО, "keep" = record-protect tab, LED disk meter.
-  - Colours from the logo (tokens in `app.css`): near-black background, chrome greys, LCD green, bolt amber for the main action, FLIX red, VCR blue.
-  - Fonts (bundled, work offline, all with Cyrillic): Russo One (wordmark, headings, buttons), Pixelify Sans (LCD text only; its Cyrillic is too rough for buttons), Press Start 2P (small labels), Caveat (handwritten tape labels), DSEG7 / DSEG14 (segment displays, digits and Latin only). Body text: system font.
+  - Shelf = VHS cassettes like the logo's (notched shell, VHS / HQ badges, silver-hub reels on both sides of a handwritten paper label): the reels show progress (tape moves left → right as it downloads, hubs spin while downloading), stickers REC / ПАУЗА / ЧЕКАЄ / ГРАЄ / ЗАПИСАНО (playing = sunset gradient + magenta glow), "keep" = record-protect tab, VFD disk meter. New tape form on a CRT blue screen above the shelf.
+  - Colours from the logo (tokens in `app.css`): night-sky background with sparkles, synthwave purple / magenta / orange / sun yellow, chrome greys, VFD cyan, FLIX red, VCR blue. Main action = sunset gradient (`.btn.hot`).
+  - Icons (`web/public`) are crops of the logo's cassette.
+  - Fonts (bundled, work offline, all with Cyrillic): Russo One (wordmark, headings, buttons), Press Start 2P (VFD text, small labels), Caveat (handwritten tape labels), DSEG7 / DSEG14 (segment displays, digits and Latin only). Body text: system font. Pixelify Sans was dropped: it lacks Cyrillic І О П.
 - Mobile first, max width 480 px, safe-area insets, touch targets ≥ 44 px, `prefers-reduced-motion` stops animations, `aria-label`s on icon buttons.
 - Checked with Edge (Puppeteer, 390×844 mobile emulation) against the real backend + mpv: all screens render without horizontal overflow; pause / play / ±10 s / next episode / volume and seek sliders / stop / magnet validation / "continue watching" work.
 
@@ -235,23 +235,24 @@ tvbox/
   - `state` при каждом изменении отслеживаемого свойства;
   - события mpv: `file-loaded`, `end-file` и другие;
   - `exit` при закрытии mpv.
-- **`PI_ARGS = ['--vo=gpu', '--gpu-context=drm', '--fs']`:** настройки для Pi, будем уточнять на этапе 6.
-- **Статус проверки:** работает с реальным mpv на Windows (через backend); на Pi ещё не проверялся.
+- **`PI_ARGS`:** settings for the Pi, see "mpv on the Pi" in the Raspberry Pi section.
+- **Статус проверки:** работает с реальным mpv на Windows и на Pi (через backend).
 
 ### `player/tvscreen.js`, class `TvScreen`: the TV picture (old VHS TV)
 
-- mpv is the only thing that draws on the TV (no browser/desktop on the Pi), so everything is ASS markup sent with mpv's `osd-overlay` command. Layer 1 = background (flat VCR blue `#1739c4` + faint CRT scanlines), layer 2 = content. A 15 fps ticker composes both and sends only when the string changed (idle: ~2 sends/s for the blinking cursor/clock).
+- mpv is the only thing that draws on the TV (no browser/desktop on the Pi), so everything is ASS markup sent with mpv's `osd-overlay` command. Overlays: 1 = still background (z 0; VCR blue `#1739c4` + faint CRT scanlines, or the synthwave scene), 3 = the synthwave's moving grid (z 1), 2 = content (z 2). A 15 fps ticker composes them and sends only when a string changed. The synthwave scene (~25 KB of ASS) is cached and resent only when the drift moves it (2 px steps, every few seconds); the grid moves at 7.5 fps.
+- Cost on the Pi (idle, mpv CPU): 37 % of a core with the grid at 15 fps, ~23 % at 7.5 fps (54 °C, no throttling).
 - `TV_ARGS` (added by `TvBox`): `--osc=no` (no mpv controller / idle logo), `--osd-level=0` (no mpv messages; `osd-overlay` still renders), `--osd-fonts-dir=player/fonts`. Font: Press Start 2P (VCR blocky, Cyrillic), converted from @fontsource WOFF by `scripts/tv-fonts.mjs`. Cyrillic and Latin subsets are separate files of one family; libass takes each glyph from whichever file has it (checked).
 - Canvas: height 1080, width follows `osd-dimensions` (polled every 3 s). Margin 100 px for overscan. All text uppercase, white with black outline and a dark-blue shadow.
 - Scenes (`setScene(scene, {title, error, episode})`, driven by `TvBox` phases):
-  - `idle`: blue screen, "■ STOP" top left, clock with blinking colon top right, "ВСТАВТЕ КАСЕТУ_" at the top. Below, a 960 px block: a **QR code** (qrcode-generator, level M, 25 modules × 8 px + 3-module quiet zone ≈ 250 px; one ASS drawing of horizontal runs, navy on off-white `#e4eaff`, whole-pixel position so modules stay sharp) with "Пульт на телефоні: <remoteUrl>", "АБО <ip>" and "Наведіть камеру телефона на код" beside it. The QR opens `qrUrl()` = the **IP address** (server's `lanUrl()`, first LAN IPv4, re-read every 30 s; no port when 80), because many Android phones can't resolve `tvbox.local`; the text still shows `TVBOX_URL`. Then "■ ЗАПИС НА ПОЛИЦЮ" (blinking red REC square) with up to 3 downloads in progress (not playing), fastest first: title (+ "done/chosen" for series), %, МБ/С; "+N ЩЕ" beyond. `TvBox` refreshes it on every library `changed` (~1/s). The disk warning sits at the bottom. Everything drifts a few pixels slowly (burn-in protection). Checked: the QR decodes (jsQR) from a 960×540 window capture, i.e. at 4 px per module.
+  - `idle`: a **synthwave night** (the user's choice, matches the logo's label): banded sky purple → magenta → pink, stars, a striped sun with a glow (gaps widening towards the horizon), mountains at the sides, palm silhouettes leaning inwards, a neon-pink floor grid (vanishing lines still, horizontal lines coming towards the viewer), CRT scanlines. All drawn procedurally in `synthScene()` / `synthGrid()` / `palm()` (polygons and bezier circles; each palm part is its own drawing, since overlapping subpaths of one drawing can cancel out). On top: "■ STOP" top left, clock with blinking colon top right, "ВСТАВТЕ КАСЕТУ_" (neon pink shadow) above the sun, the disk warning under it. On the grid, translucent dark panels with pink edges (bottom-aligned at the margin): left, a **QR code** (qrcode-generator, level M, 25 modules × 8 px + 3-module quiet zone ≈ 250 px; one ASS drawing of horizontal runs, navy on off-white `#e4eaff`, whole-pixel position so modules stay sharp) with "Пульт на телефоні: <remoteUrl>", "АБО <ip>" and "Наведіть камеру телефона на код" beside it. The QR opens `qrUrl()` = the **IP address** (server's `lanUrl()`, first LAN IPv4, re-read every 30 s; no port when 80), because many Android phones can't resolve `tvbox.local`; the text still shows `TVBOX_URL`. Right panel (only when something records; alone, the QR panel is centred): "■ ЗАПИС НА ПОЛИЦЮ" (blinking red REC square) with up to 3 downloads in progress (not playing), fastest first: title (+ "done/chosen" for series), %, МБ/С; "+N ЩЕ" beyond. `TvBox` refreshes it on every library `changed` (~1/s). Everything, scene included, drifts a few pixels slowly (burn-in protection). Checked: the QR decodes (jsQR) from a 960×540 window capture, i.e. at 4 px per module.
   - `loading`: blue, "▶ PLAY", "ЗАВАНТАЖУЮ КАСЕТУ..." (text only, like a real VCR), title and episode.
   - Blinking "_", counting "...", the clock's ":": the whole line is always laid out at full length and the "off" characters are drawn transparent (`text()` tail argument). libass drops trailing spaces, so padding with spaces made centred text jump.
   - `error`: blue, "■ STOP", "КАСЕТУ НЕ ПРОЧИТАНО_", error text wrapped (≤ 3 lines).
   - `playing`: the blue loading screen stays until the film's first frame (`playback-restart`, fallback: position > 1 s), then transparent with VCR messages: "▶ PLAY" + "СЕРІЯ n/N" + title for 4 s at start; "❚❚ PAUSE" + tape counter while paused; "▶▶ / ◀◀ 0:01:06" after seeks (direction from position before `seek` vs after); "▶ PLAY" on resume; green 20-block VOLUME bar on volume change; blinking "ЗАВАНТАЖЕННЯ" top right while buffering > 0.7 s. Messages react to mpv events, so they also appear for changes not made from the phone.
 - `TvBox` starts mpv in `init()`, so the TV shows the blue screen right after boot; if mpv is missing, the server still starts (error logged). `remoteUrl` = `TVBOX_URL` env or `http://<first LAN IPv4>:<port>`.
 - `TVBOX_MPV_ARGS` env: extra mpv options, e.g. `--geometry=960x540+40+40` for development.
-- Checked on Windows (window captures): idle, loading, start card, seek, resume, pause, volume.
+- Checked on Windows (window captures): idle (synthwave, QR decodes, grid moves), loading, start card, seek, resume, pause, volume.
 
 ### Raspberry Pi (stage 6)
 

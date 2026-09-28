@@ -120,8 +120,9 @@ address to open on your phone.
 
 ## The TV picture
 
-When nothing plays, the TV shows an old-VCR blue screen: "ВСТАВТЕ КАСЕТУ", a clock and the
-address of the phone remote. While a film loads it shows "ЗАВАНТАЖУЮ КАСЕТУ..."; during the film,
+When nothing plays, the TV shows a synthwave night (striped sun, palms, a moving neon grid) with
+"ВСТАВТЕ КАСЕТУ", a clock, a QR code and the address of the phone remote, and what is downloading.
+While a film loads it shows an old-VCR blue screen, "ЗАВАНТАЖУЮ КАСЕТУ..."; during the film,
 VCR-style messages: ▶ PLAY, ❚❚ PAUSE with the tape counter, ▶▶ / ◀◀ after seeking, a green
 volume bar. It is all drawn by mpv's on-screen display, so it works on the Pi without a desktop.
 
@@ -135,7 +136,7 @@ Open the address the backend prints (e.g. `http://192.168.1.20:8080`) on your ph
 Wi‑Fi network. To get an app icon, use "Add to Home Screen" (Safari) / "Install app" or
 "Add to home screen" (Chrome).
 
-- **Пульт** (remote): LCD with the tape counter (tap it to switch to time remaining), seek bar,
+- **Пульт** (remote): a VCR deck. Display with the tape counter (tap it to switch to time remaining), seek bar,
   play/pause, ±10 s, previous/next episode, volume, audio and subtitle tracks, stop. When nothing
   plays: the magnet form and "continue watching".
 - **Полиця** (shelf): every film as a VHS tape. The tape moves from the left reel to the right one

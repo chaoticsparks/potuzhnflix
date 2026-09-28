@@ -37,9 +37,12 @@
   });
 </script>
 
-<section class="new vcr-mini" aria-label="Нова касета">
-  <h2 class="tiny">Нова касета</h2>
-  <MagnetForm {onPlay} onDownload={(item) => (justAdded = item.id)} />
+<section class="tv" aria-label="Нова касета">
+  <div class="crt">
+    <p class="vcr-title">▶ НОВА КАСЕТА<span class="cursor">_</span></p>
+    <MagnetForm {onPlay} onDownload={(item) => (justAdded = item.id)} />
+  </div>
+  <div class="tv-chin tiny" aria-hidden="true"><span>ПотужнFLIX</span><span class="tv-led"></span></div>
 </section>
 
 <section aria-label="Полиця">
@@ -66,37 +69,39 @@
     </div>
   {:else}
     <div class="empty">
-      <img src="/logo.jpg" alt="ПотужнFLIX" width="720" height="505" />
-      <p>Полиця порожня. Вставте magnet-посилання вище — касета з'явиться тут.</p>
+      <img src="/logo.jpg" alt="ПотужнFLIX" width="720" height="374" />
+      <p>Полиця порожня. Вставте magnet-посилання або .torrent вище — касета з'явиться тут.</p>
     </div>
   {/if}
 </section>
 
 <style>
   section { display: grid; gap: 12px; }
-  .vcr-mini {
-    padding: 12px var(--gutter) 14px;
-    background:
-      repeating-linear-gradient(180deg, rgb(255 255 255 / 0.035) 0 1px, transparent 1px 3px),
-      linear-gradient(180deg, #1d44d6, var(--vcr));
-    border: 2px solid #0a1a66;
-    border-radius: 10px;
-    margin-bottom: 18px;
-  }
-  .vcr-mini h2 { margin: 0; color: #fff; }
+  .tv { margin: 0 0 22px; }
 
   .heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  h2 { margin: 0; font-family: var(--f-head); font-weight: 400; font-size: 22px; font-style: italic; }
+  h2 {
+    margin: 0;
+    font-family: var(--f-head);
+    font-weight: 400;
+    font-size: 24px;
+    font-style: italic;
+    background: linear-gradient(180deg, #fff 0%, #dfe4f5 45%, #8d93b0 55%, #e6eaf8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 2px 0 #1a1030);
+  }
   .free { margin: -6px 0 4px; font-size: 8px; }
 
-  /* LED disk meter */
-  .meter { display: flex; gap: 2px; padding: 4px; background: #000; border-radius: 3px; border: 1px solid #2a2e35; }
-  .meter i { width: 5px; height: 14px; background: #10220c; }
-  .meter i.warn { background: #2a2408; }
+  /* VFD disk meter: cyan, then sunset orange, then FLIX red when the disk fills up */
+  .meter { display: flex; gap: 2px; padding: 4px; background: var(--vfd-bg); border-radius: 3px; border: 1px solid #000; box-shadow: 0 1px 0 rgb(255 255 255 / 0.08); }
+  .meter i { width: 5px; height: 14px; background: var(--vfd-off); }
+  .meter i.warn { background: #2a1a0b; }
   .meter i.full { background: #2d0c0a; }
-  .meter i.on { background: var(--lcd); box-shadow: 0 0 4px var(--lcd); }
-  .meter i.on.warn { background: #ffd23a; box-shadow: 0 0 4px #ffd23a; }
-  .meter i.on.full { background: var(--flix); box-shadow: 0 0 4px var(--flix); }
+  .meter i.on { background: var(--vfd); box-shadow: 0 0 5px var(--vfd); }
+  .meter i.on.warn { background: var(--orange); box-shadow: 0 0 5px var(--orange); }
+  .meter i.on.full { background: var(--flix); box-shadow: 0 0 5px var(--flix); }
 
   .tapes { display: grid; gap: 18px; }
 

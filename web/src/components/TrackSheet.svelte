@@ -36,7 +36,7 @@
 
 <dialog bind:this={dialog} class="panel sheet" onclose={onClose} onclick={(e) => e.target === dialog && dialog.close()}>
   <div class="titlebar">{kind === 'audio' ? 'Аудіо' : 'Субтитри'}</div>
-  <div class="list lcd" role="listbox" aria-label={kind === 'audio' ? 'Аудіодоріжки' : 'Субтитри'}>
+  <div class="list vfd" role="listbox" aria-label={kind === 'audio' ? 'Аудіодоріжки' : 'Субтитри'}>
     {#if tracks === null}
       <p class="empty">ЧИТАЮ ДОРІЖКИ…</p>
     {:else}
@@ -72,10 +72,10 @@
     min-height: 44px;
     padding: 8px;
     text-align: left;
-    color: var(--lcd);
+    color: var(--vfd);
     background: none;
     border: 0;
-    border-bottom: 1px dashed var(--lcd-off);
+    border-bottom: 1px dashed var(--vfd-off);
     position: relative;
     z-index: 1;
   }
@@ -83,9 +83,9 @@
   .led {
     width: 10px; height: 10px; flex: none;
     border-radius: 50%;
-    background: var(--lcd-off);
+    background: var(--vfd-off);
   }
-  .led.on { background: var(--lcd); box-shadow: 0 0 8px var(--lcd); }
+  .led.on { background: var(--vfd); box-shadow: 0 0 8px var(--vfd); }
   .empty { margin: 12px 8px; }
   .close { width: 100%; margin-top: 10px; }
 </style>
