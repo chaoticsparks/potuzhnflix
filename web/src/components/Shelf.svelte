@@ -7,7 +7,9 @@
   import { api } from '../lib/api.js';
   import { size } from '../lib/format.js';
 
-  let { onPlay = () => {} } = $props();
+  // openId: a series just put on the shelf from the remote — open its episode choice
+  let { onPlay = () => {}, openId = null } = $props();
+  let justAdded = $state(null);
 
   let storage = $state(null);
   const SEGMENTS = 20;
@@ -37,7 +39,7 @@
 
 <section class="new vcr-mini" aria-label="Нова касета">
   <h2 class="tiny">Нова касета</h2>
-  <MagnetForm {onPlay} />
+  <MagnetForm {onPlay} onDownload={(item) => (justAdded = item.id)} />
 </section>
 
 <section aria-label="Полиця">
@@ -59,7 +61,7 @@
   {#if live.downloads.length}
     <div class="tapes">
       {#each live.downloads as item (item.id)}
-        <Tape {item} {onPlay} />
+        <Tape {item} {onPlay} open={item.id === (justAdded ?? openId)} />
       {/each}
     </div>
   {:else}

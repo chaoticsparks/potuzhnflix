@@ -1,26 +1,74 @@
 <script>
   // One download on the shelf, drawn as a VHS cassette.
   // Tape moves from the left reel to the right one as it downloads; "keep" is the record-protect tab.
+  // A series lists its episodes with a "download" tick each.
   import Icon from './Icon.svelte';
   import { api } from '../lib/api.js';
   import { toast } from '../lib/toast.svelte.js';
   import { size, speed, percent, until, plural, prettyName } from '../lib/format.js';
 
-  let { item, onPlay = () => {} } = $props();
+  // open: a series just added to the shelf — show its episode choice right away
+  let { item, onPlay = () => {}, open = false } = $props();
 
   let confirming = $state(false);
   let busy = $state(false);
   let showEpisodes = $state(false);
+  let card;
 
   const series = $derived(item.files.length > 1);
+
+  $effect(() => {
+    if (open && series) {
+      showEpisodes = true;
+      card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+
+  // Episode choice: kept locally while the user taps, sent once they pause for 0.4 s
+  // (the item from the server arrives ~1 s later; quick taps must not overwrite each other)
+  let wantedLocal = $state(null);
+  let wantedTimer;
+  const wanted = $derived(wantedLocal ?? item.files.map((f) => f.wanted));
+  const wantedCount = $derived(wanted.filter(Boolean).length);
+  const wantedSize = $derived(item.files.reduce((sum, f, i) => sum + (wanted[i] ? f.length : 0), 0));
+
+  function setWanted(next) {
+    wantedLocal = next;
+    clearTimeout(wantedTimer);
+    wantedTimer = setTimeout(async () => {
+      try {
+        await api.update(item.id, { wanted: next.flatMap((w, i) => (w ? [i] : [])) });
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      if (wantedLocal === next) wantedLocal = null;
+    }, 400);
+  }
+  const toggleEpisode = (i) => setWanted(wanted.map((w, k) => (k === i ? !w : w)));
+
+  // What this series will download, in words
+  const plan = $derived.by(() => {
+    if (!series) return null;
+    const total = item.files.length;
+    if (wantedCount === 0) return 'Жодна серія не вибрана для завантаження';
+    if (item.state === 'complete') {
+      return wantedCount === total ? 'Усі серії записано' : `Записано ${wantedCount} з ${total} серій`;
+    }
+    if (wantedCount === total) return `Завантажуються всі серії · ${size(wantedSize)}`;
+    return `Вибрано ${wantedCount} з ${total} серій · ${size(wantedSize)}`;
+  });
+
   const recording = $derived(item.state === 'downloading' && !item.waiting && !item.playing);
-  const sticker = $derived(
-    item.playing ? { text: '▶ Грає', kind: 'play' }
-      : item.state === 'complete' ? { text: '✔ Записано', kind: 'done' }
-      : item.state === 'paused' ? { text: '‖ Пауза', kind: 'pause' }
-      : item.waiting ? { text: '… Чекає', kind: 'wait' }
-      : { text: 'REC', kind: 'rec' },
-  );
+  const sticker = $derived.by(() => {
+    if (item.playing) return { text: '▶ Грає', kind: 'play' };
+    if (item.state === 'complete') {
+      const partial = series && item.wantedCount < item.files.length;
+      return { text: partial ? `✔ ${item.wantedDone}/${item.files.length}` : '✔ Записано', kind: 'done' };
+    }
+    if (item.state === 'paused') return { text: '‖ Пауза', kind: 'pause' };
+    if (item.waiting) return { text: '… Чекає', kind: 'wait' };
+    return { text: 'REC', kind: 'rec' };
+  });
 
   // Reel radii in the tape window (SVG units)
   const R_MIN = 9;
@@ -47,7 +95,7 @@
   const remove = () => run(() => api.remove(item.id), () => toast(`Стерто: ${prettyName(item.title)}`));
 </script>
 
-<article class="tape" class:playing={item.playing}>
+<article class="tape" class:playing={item.playing} bind:this={card}>
   <button class="tab" class:kept={item.keep} aria-pressed={item.keep} disabled={busy} onclick={toggleKeep}
     title={item.keep ? 'Захищено від стирання' : 'Не стирати автоматично'}>
     <Icon name="lock" size={14} />
@@ -80,6 +128,8 @@
     </div>
   </div>
 
+  {#if plan}<p class="plan" class:none={wantedCount === 0}>{plan}</p>{/if}
+
   <p class="expiry tiny">
     {#if item.keep}Не зітреться автоматично{:else if item.expiresAt}Зітреться {until(item.expiresAt)}{/if}
   </p>
@@ -111,21 +161,38 @@
   {/if}
 
   {#if series}
-    <button class="toggle tiny" aria-expanded={showEpisodes} aria-controls="eps-{item.id}" onclick={() => (showEpisodes = !showEpisodes)}>
-      {showEpisodes ? '▾' : '▸'} Серії · {item.files.length}
+    <button class="chrome btn small toggle" aria-expanded={showEpisodes} aria-controls="eps-{item.id}"
+      onclick={() => (showEpisodes = !showEpisodes)}>
+      {showEpisodes ? '▾' : '▸'} Серії: завантажувати {wantedCount} з {item.files.length}
     </button>
     {#if showEpisodes}
-      <ol id="eps-{item.id}">
-        {#each item.files as f, i}
-          <li>
-            <button class="ep" class:current={i === item.episode && item.lastPlayedAt} disabled={busy} onclick={() => play(i)}>
-              <span class="num tiny">{String(i + 1).padStart(2, '0')}</span>
-              <span class="name">{prettyName(f.name)}</span>
-              <span class="tiny ep-state">{f.done ? '✔' : percent(f.progress)}</span>
-            </button>
-          </li>
-        {/each}
-      </ol>
+      <div class="episodes" id="eps-{item.id}">
+        <p class="hint">Позначте серії, які завантажити на полицю. Решта не качається, але їх можна дивитися онлайн.</p>
+        <div class="bulk">
+          <button class="chrome btn small" disabled={wantedCount === item.files.length}
+            onclick={() => setWanted(item.files.map(() => true))}>Усі</button>
+          <button class="chrome btn small" disabled={wantedCount === 0}
+            onclick={() => setWanted(item.files.map(() => false))}>Жодної</button>
+        </div>
+        <ol>
+          {#each item.files as f, i}
+            <li class="ep" class:current={i === item.episode && item.lastPlayedAt} class:off={!wanted[i]}>
+              <button class="check" role="checkbox" aria-checked={wanted[i]} onclick={() => toggleEpisode(i)}
+                aria-label="Завантажувати серію {i + 1}">
+                <span class="box" aria-hidden="true">{wanted[i] ? '✔' : ''}</span>
+                <span class="num tiny">{String(i + 1).padStart(2, '0')}</span>
+                <span class="name">{prettyName(f.name)}</span>
+                <span class="tiny ep-state">
+                  {f.done ? '✔' : f.progress > 0 ? percent(f.progress) : wanted[i] ? '0%' : '—'}
+                </span>
+              </button>
+              <button class="watch" disabled={busy} onclick={() => play(i)} aria-label="Дивитися серію {i + 1}">
+                <Icon name="play" size={16} />
+              </button>
+            </li>
+          {/each}
+        </ol>
+      </div>
     {/if}
   {/if}
 </article>
@@ -144,6 +211,7 @@
     border: 1px solid #2c2d32;
     border-radius: 8px;
     box-shadow: 0 8px 20px rgb(0 0 0 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.06);
+    scroll-margin-top: 12px;
   }
   .tape.playing { border-color: var(--bolt); box-shadow: 0 0 0 1px var(--bolt), 0 8px 24px rgb(255 148 22 / 0.25); }
 
@@ -215,6 +283,9 @@
   @keyframes blink { 50% { opacity: 0; } }
   .pct { color: var(--text); }
 
+  .plan { margin: 0; font-size: 14px; color: var(--text); }
+  .plan.none { color: #ffd23a; }
+
   .expiry { margin: 0; color: var(--muted); font-size: 8px; }
 
   .actions { display: flex; gap: 8px; }
@@ -231,19 +302,23 @@
   .confirm p { margin: 0; }
   .confirm .actions > * { flex: 1; }
 
-  .toggle {
-    justify-self: start;
-    min-height: 40px;
-    padding: 0 4px;
-    color: var(--chrome-2);
-    background: none;
-    border: 0;
-  }
+  /* Episodes of a series */
+  .toggle { justify-content: flex-start; }
+  .episodes { display: grid; gap: 8px; }
+  .hint { margin: 0; font-size: 13px; color: var(--muted); }
+  .bulk { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
   .ep {
-    width: 100%;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    background: var(--lcd-bg);
+    border: 1px solid #1d2a1a;
+    border-radius: 4px;
+  }
+  .ep.current { border-color: var(--lcd-mid); box-shadow: inset 3px 0 0 var(--lcd); }
+  .check {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
     min-height: 44px;
@@ -251,11 +326,33 @@
     text-align: left;
     font-family: var(--f-pixel);
     color: var(--lcd);
-    background: var(--lcd-bg);
-    border: 1px solid #1d2a1a;
-    border-radius: 4px;
+    background: none;
+    border: 0;
   }
-  .ep.current { border-color: var(--lcd-mid); box-shadow: inset 3px 0 0 var(--lcd); }
+  .box {
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    font-size: 14px;
+    line-height: 1;
+    color: #0b1c05;
+    background: var(--lcd);
+    border: 2px solid var(--lcd-mid);
+    border-radius: 3px;
+  }
+  .ep.off .box { background: transparent; }
+  .ep.off .check { color: #4c6b3f; }
+  .watch {
+    display: grid;
+    place-items: center;
+    color: var(--lcd);
+    background: #0d180b;
+    border: 0;
+    border-left: 1px solid #1d2a1a;
+    border-radius: 0 4px 4px 0;
+  }
+  .watch:disabled { opacity: 0.4; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .num, .ep-state { color: var(--lcd-mid); }
 </style>

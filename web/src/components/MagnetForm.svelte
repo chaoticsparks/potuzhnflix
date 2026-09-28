@@ -23,8 +23,8 @@
         onPlay();
       } else {
         const item = await api.download(magnet.trim());
-        toast(`На полиці: ${prettyName(item.title)}`);
-        onDownload();
+        toast(item.files.length > 1 ? `На полиці: ${prettyName(item.title)} — оберіть серії` : `На полиці: ${prettyName(item.title)}`);
+        onDownload(item);
       }
       magnet = '';
     } catch (err) {

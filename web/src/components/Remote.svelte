@@ -8,6 +8,9 @@
   import { toast } from '../lib/toast.svelte.js';
   import { clock, speed, percent, prettyName, plural } from '../lib/format.js';
 
+  // onDownload(item): a magnet was put on the shelf from here
+  let { onDownload = () => {} } = $props();
+
   const s = $derived(live.status);
   const phase = $derived(s?.phase ?? 'idle');
   const p = $derived(phase === 'playing' ? s?.player : null);
@@ -219,7 +222,7 @@
         </span>
       </button>
     {/if}
-    <MagnetForm />
+    <MagnetForm {onDownload} />
   </section>
 {:else if phase === 'loading'}
   <section class="vcr loading" aria-live="polite">

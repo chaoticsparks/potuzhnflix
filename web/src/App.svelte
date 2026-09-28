@@ -11,6 +11,7 @@
   let tab = $state('remote');   // 'remote' | 'shelf'
   let powerSheet = $state(false);
   let off = $state(null);         // 'poweroff' | 'reboot' once the box was told to
+  let added = $state(null);       // id of a download just put on the shelf from the remote tab
 
   // The box came back after a reboot (a fresh status without poweringOff)
   $effect(() => {
@@ -70,9 +71,9 @@
 
 <main>
   {#if tab === 'remote'}
-    <Remote />
+    <Remote onDownload={(item) => { added = item.id; show('shelf'); }} />
   {:else}
-    <Shelf onPlay={() => show('remote')} />
+    <Shelf onPlay={() => show('remote')} openId={added} />
   {/if}
 </main>
 

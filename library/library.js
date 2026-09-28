@@ -80,7 +80,7 @@ export class Library extends EventEmitter {
         infoHash: t.infoHash,
         title: t.name,
         files: chosen.map((f) => ({
-          index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false,
+          index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false, wanted: true,
         })),
         episode: 0,             // last played entry of `files`
         state: 'downloading',   // downloading | paused | complete
@@ -111,6 +111,7 @@ export class Library extends EventEmitter {
     }
     const f = item.files[k];
     const now = Date.now();
+    f.wanted = true;   // watching an episode means keeping it
     item.episode = k;
     item.lastPlayedAt = now;
     item.lastActivityAt = now;
@@ -127,8 +128,8 @@ export class Library extends EventEmitter {
       // File vanished from disk — download it again
       f.done = false;
       f.downloaded = 0;
-      item.completedAt = null;
     }
+    if (item.state === 'complete') item.completedAt = null;
     if (item.state !== 'downloading') item.state = 'downloading';
 
     this.playing = { id, episode: k };
@@ -162,6 +163,43 @@ export class Library extends EventEmitter {
     await this.#ensureSpace(remaining(item), id);
     item.state = 'downloading';
     item.lastActivityAt = Date.now();
+    await this.#sync();
+    this.#changed();
+    return this.view(item);
+  }
+
+  // Which episodes to download: positions in `files`. The others stop downloading; what is already
+  // on disk stays (deleting one file of a torrent would break the pieces it shares with neighbours).
+  async setWanted(id, episodes) {
+    const item = this.#get(id);
+    const chosen = new Set(episodes);
+    for (const k of chosen) {
+      if (!Number.isInteger(k) || k < 0 || k >= item.files.length) throw httpError(400, `No episode ${k}`);
+    }
+    const before = remaining(item);
+    const previous = item.files.map((f) => f.wanted);
+    item.files.forEach((f, k) => { f.wanted = chosen.has(k); });
+    const after = remaining(item);
+    if (after > before) {
+      try {
+        await this.#ensureSpace(after, id);
+      } catch (err) {
+        item.files.forEach((f, k) => { f.wanted = previous[k]; });
+        throw err;
+      }
+    }
+
+    const now = Date.now();
+    item.lastActivityAt = now;
+    if (allWantedDone(item)) {
+      if (item.state !== 'complete') {
+        item.state = 'complete';
+        item.completedAt = now;
+      }
+    } else if (item.state === 'complete') {
+      item.state = 'downloading';
+      item.completedAt = null;
+    }
     await this.#sync();
     this.#changed();
     return this.view(item);
@@ -222,12 +260,20 @@ export class Library extends EventEmitter {
     const active = (item.state === 'downloading' || playing) && !waiting && stats;
     const length = sum(item.files, 'length');
     const downloaded = sum(item.files, 'downloaded');
+    // Progress and "complete" are about the chosen episodes
+    const chosen = item.files.filter((f) => f.wanted);
+    const wantedLength = sum(chosen, 'length');
+    const wantedDownloaded = sum(chosen, 'downloaded');
     return {
       id: item.id,
       title: item.title,
       length,
       downloaded,
-      progress: length ? downloaded / length : 0,
+      wantedLength,
+      wantedDownloaded,
+      wantedCount: chosen.length,
+      wantedDone: chosen.filter((f) => f.done).length,
+      progress: wantedLength ? wantedDownloaded / wantedLength : 0,
       state: item.state,
       waiting,   // paused for now because another film plays
       playing,
@@ -237,7 +283,7 @@ export class Library extends EventEmitter {
       episode: item.episode,
       files: item.files.map((f) => ({
         name: f.name, length: f.length, downloaded: f.downloaded,
-        progress: f.length ? f.downloaded / f.length : 0, done: f.done,
+        progress: f.length ? f.downloaded / f.length : 0, done: f.done, wanted: f.wanted,
       })),
       addedAt: item.addedAt,
       completedAt: item.completedAt,
@@ -279,7 +325,7 @@ export class Library extends EventEmitter {
     f.done = true;
     f.downloaded = f.length;
     item.lastActivityAt = now;
-    if (item.files.every((x) => x.done)) {
+    if (allWantedDone(item) && item.state !== 'complete') {
       item.state = 'complete';
       item.completedAt = now;
     }
@@ -306,7 +352,7 @@ export class Library extends EventEmitter {
         const k = this.playing.episode;
         for (const f of item.files.slice(k, k + 2)) want(item.infoHash, f);
       } else if (item.state === 'downloading' && !this.playing) {
-        for (const f of item.files) want(item.infoHash, f);
+        for (const f of item.files) if (f.wanted) want(item.infoHash, f);
       }
     }
 
@@ -458,7 +504,7 @@ export class Library extends EventEmitter {
           infoHash: t.infoHash,
           title: t.name,
           files: chosen.map((f) => ({
-            index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false,
+            index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false, wanted: true,
           })),
           episode: 0,
           state: 'downloading',
@@ -486,20 +532,30 @@ async function syncDir(dir) {
   }
 }
 
-// v1 items held a single file in flat fields
+// v1 items held a single file in flat fields; items before episode choice had no `wanted`
 function migrate(item) {
-  if (item.files) return item;
-  const { fileIndex, name, path: p, length, downloaded, ...rest } = item;
-  const done = item.state === 'complete';
-  return {
-    ...rest,
-    files: [{ index: fileIndex, name, path: p, length, downloaded: done ? length : downloaded, done }],
-    episode: 0,
-  };
+  if (!item.files) {
+    const { fileIndex, name, path: p, length, downloaded, ...rest } = item;
+    const done = item.state === 'complete';
+    item = {
+      ...rest,
+      files: [{ index: fileIndex, name, path: p, length, downloaded: done ? length : downloaded, done }],
+      episode: 0,
+    };
+  }
+  for (const f of item.files) f.wanted ??= true;
+  return item;
 }
 
+// Bytes still to download for the chosen episodes
 function remaining(item) {
-  return item.files.reduce((s, f) => s + (f.done ? 0 : f.length - f.downloaded), 0);
+  return item.files.reduce((s, f) => s + (f.done || !f.wanted ? 0 : f.length - f.downloaded), 0);
+}
+
+// "Complete" = every chosen episode is on disk (and at least one is chosen)
+function allWantedDone(item) {
+  const chosen = item.files.filter((f) => f.wanted);
+  return chosen.length > 0 && chosen.every((f) => f.done);
 }
 
 function sum(list, key) {

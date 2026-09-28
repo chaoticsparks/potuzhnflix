@@ -76,9 +76,11 @@ export class TvBox extends EventEmitter {
     return this.libraryReady ? this.library.list() : [];
   }
 
-  async updateDownload(id, { paused, keep }) {
+  // { paused?, keep?, wanted?: episode positions to download }
+  async updateDownload(id, { paused, keep, wanted }) {
     this.#needLibrary();
     if (!this.library.get(id)) throw httpError(404, `No such download: ${id}`);
+    if (wanted !== undefined) await this.library.setWanted(id, wanted);
     if (keep !== undefined) this.library.setKeep(id, keep);
     if (paused === true) await this.library.pause(id);
     if (paused === false) await this.library.resume(id);

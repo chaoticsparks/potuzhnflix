@@ -106,10 +106,17 @@ app.post('/api/downloads', {
   return box.download(req.body);
 });
 
-// Body: { paused?: boolean, keep?: boolean }
+// Body: { paused?: boolean, keep?: boolean, wanted?: [episode positions to download] }
 app.patch('/api/downloads/:id', {
   schema: {
-    body: { type: 'object', properties: { paused: { type: 'boolean' }, keep: { type: 'boolean' } } },
+    body: {
+      type: 'object',
+      properties: {
+        paused: { type: 'boolean' },
+        keep: { type: 'boolean' },
+        wanted: { type: 'array', items: { type: 'integer', minimum: 0 }, uniqueItems: true },
+      },
+    },
   },
 }, (req) => box.updateDownload(req.params.id, req.body));
 
