@@ -37,6 +37,7 @@ export class Library extends EventEmitter {
 
   async load() {
     await fs.mkdir(this.dir, { recursive: true });
+    await this.engine.start();
     for (const item of await this.#readSaved()) this.items.set(item.id, migrate(item));
 
     await this.#deleteOrphans();

@@ -3,6 +3,8 @@
 // Disk layout under `dir`:
 //   data/<infoHash>/<paths from the torrent>   downloaded files
 //   torrents/<infoHash>.torrent                saved metadata, so re-adding needs no network
+//   torrents/<infoHash>.bitfield               which pieces are on disk, so re-adding skips re-hashing
+//   torrents/.clean-shutdown                   written by destroy(): the bitfields can be trusted
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -26,6 +28,8 @@ export const VIDEO_TYPES = {
 };
 
 const METADATA_TIMEOUT_MS = 90 * 1000;
+const BITFIELD_SAVE_MS = 30 * 1000;
+const CLEAN_MARKER = '.clean-shutdown';
 
 export const DEFAULT_CACHE_DIR = process.env.TVBOX_CACHE ?? path.join(os.tmpdir(), 'tvbox-cache');
 
@@ -39,6 +43,22 @@ export class TorrentEngine extends EventEmitter {
     this.adding = new Map();     // infoHash → Promise<Torrent> while metadata is loading
     this.selected = new Map();   // infoHash → Set of selected file indexes
     this.server = null;
+    this.trustBitfields = false;
+    this.bitfieldSaves = new Map();   // infoHash → last save in progress
+    this.bitfieldTimer = setInterval(() => this.#saveBitfields(), BITFIELD_SAVE_MS);
+  }
+
+  // Call once before adding torrents. Saved bitfields are trusted only after a clean shutdown:
+  // after a power cut the newest pieces may not have reached the disk while the bitfield says they
+  // did. Without the marker they are dropped and WebTorrent re-hashes the data once (slow, correct).
+  async start() {
+    await fs.mkdir(this.torrentsDir, { recursive: true });
+    this.trustBitfields = await fs.unlink(path.join(this.torrentsDir, CLEAN_MARKER)).then(() => true, () => false);
+    if (!this.trustBitfields) {
+      for (const name of await fs.readdir(this.torrentsDir)) {
+        if (name.endsWith('.bitfield')) await fs.rm(path.join(this.torrentsDir, name), { force: true });
+      }
+    }
   }
 
   // Magnet link or info hash → ready Torrent (reuses a loaded one)
@@ -86,7 +106,9 @@ export class TorrentEngine extends EventEmitter {
   async remove(infoHash) {
     this.selected.delete(infoHash);
     const torrent = this.client.torrents.find((t) => t.infoHash === infoHash);
-    if (torrent) await new Promise((resolve) => torrent.destroy({ destroyStore: false }, resolve));
+    if (!torrent) return;
+    await this.#saveBitfield(torrent);
+    await new Promise((resolve) => torrent.destroy({ destroyStore: false }, resolve));
   }
 
   // Absolute path of a file inside a torrent's data folder
@@ -98,6 +120,7 @@ export class TorrentEngine extends EventEmitter {
   async deleteTorrentData(infoHash) {
     await fs.rm(path.join(this.dataDir, infoHash), { recursive: true, force: true, maxRetries: 5 });
     await fs.rm(path.join(this.torrentsDir, `${infoHash}.torrent`), { force: true });
+    await fs.rm(this.#bitfieldPath(infoHash), { force: true });
   }
 
   // Starts the local HTTP server once; returns the stream URL for a file
@@ -113,12 +136,15 @@ export class TorrentEngine extends EventEmitter {
   }
 
   async destroy() {
+    clearInterval(this.bitfieldTimer);
+    await this.#saveBitfields();
     if (this.server) {
       this.server.closeAllConnections?.();
       await new Promise((resolve) => this.server.close(resolve));
       this.server = null;
     }
     await new Promise((resolve) => this.client.destroy(resolve));
+    await fs.writeFile(path.join(this.torrentsDir, CLEAN_MARKER), '').catch(() => {});
   }
 
   async #resolve(magnetOrHash) {
@@ -134,13 +160,22 @@ export class TorrentEngine extends EventEmitter {
   }
 
   async #add(id, infoHash) {
-    // Start with nothing selected; setSelection() decides what downloads
-    const torrent = this.client.add(id, { path: path.join(this.dataDir, infoHash), deselect: true });
+    // Start with nothing selected; setSelection() decides what downloads. A saved bitfield lets
+    // WebTorrent trust what is on disk (spot-checking a piece or two per file) instead of re-hashing
+    // gigabytes, which took minutes for a series on a USB hard disk.
+    const bitfield = this.trustBitfields ? await fs.readFile(this.#bitfieldPath(infoHash)).catch(() => null) : null;
+    const torrent = this.client.add(id, {
+      path: path.join(this.dataDir, infoHash),
+      deselect: true,
+      ...(bitfield && { bitfield }),
+    });
     await new Promise((resolve, reject) => {
+      // Only the metadata wait needs peers; checking the data already on disk may take a while
       const timer = setTimeout(() => {
         reject(new Error('Could not get torrent metadata: no peers found'));
         torrent.destroy();
       }, METADATA_TIMEOUT_MS);
+      torrent.once('metadata', () => clearTimeout(timer));
       const done = (fn) => (arg) => { clearTimeout(timer); fn(arg); };
       torrent.once('ready', done(resolve));
       torrent.once('error', done(reject));
@@ -149,7 +184,12 @@ export class TorrentEngine extends EventEmitter {
     });
 
     torrent.files.forEach((file, index) => {
-      if (!file.done) file.once('done', () => this.emit('file-done', infoHash, index));
+      if (!file.done) {
+        file.once('done', () => {
+          this.#saveBitfield(torrent);
+          this.emit('file-done', infoHash, index);
+        });
+      }
     });
 
     const saved = path.join(this.torrentsDir, `${infoHash}.torrent`);
@@ -158,6 +198,33 @@ export class TorrentEngine extends EventEmitter {
       if (err.code !== 'EEXIST') throw err;
     });
     return torrent;
+  }
+
+  #bitfieldPath(infoHash) {
+    return path.join(this.torrentsDir, `${infoHash}.bitfield`);
+  }
+
+  // Temp file + rename: a torn write must not leave a bitfield claiming pieces that aren't there.
+  // Serialised per torrent: several files finishing at once share one temp file.
+  #saveBitfield(torrent) {
+    const key = torrent.infoHash;
+    const next = (this.bitfieldSaves.get(key) ?? Promise.resolve()).then(async () => {
+      if (!torrent.ready || torrent.destroyed || !torrent.bitfield) return;
+      const target = this.#bitfieldPath(key);
+      const tmp = `${target}.tmp`;
+      try {
+        await fs.writeFile(tmp, Buffer.from(torrent.bitfield.buffer));
+        await fs.rename(tmp, target);
+      } catch (err) {
+        this.emit('error', new Error(`Could not save bitfield: ${err.message}`));
+      }
+    });
+    this.bitfieldSaves.set(key, next);
+    return next;
+  }
+
+  #saveBitfields() {
+    return Promise.all(this.client.torrents.map((t) => this.#saveBitfield(t)));
   }
 
   #handle(req, res) {
