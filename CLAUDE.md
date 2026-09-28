@@ -8,7 +8,7 @@
 
 **Name: «ПотужнFLIX»** (logo: `logo.png` in the repo root). UI language: Ukrainian.
 
-- **Управление:** с телефона через простое PWA. Пользователь вставляет magnet-ссылку и нажимает «Смотреть» или «Скачать».
+- **Управление:** с телефона через простое PWA. Пользователь вставляет magnet-ссылку или выбирает .torrent файл и нажимает «Смотреть» или «Скачать».
 - **Воспроизведение:** приставка скачивает фильм по торренту во временное хранилище и сразу начинает показ, не дожидаясь полной загрузки. Торрент с несколькими видео (сериал) играет как плейлист.
 - **Видео идёт по HDMI прямо на телевизор.** На телефон видео НЕ передаётся: телефон работает только как пульт (пауза, громкость, перемотка, дорожки).
 - **По сети между телефоном и приставкой** ходят только команды и статус. Весь тяжёлый трафик идёт из интернета в приставку, а оттуда по HDMI в телевизор.
@@ -28,7 +28,7 @@
 - **mpv:** управляется через JSON IPC-сокет. На Pi выводит видео напрямую в DRM/KMS, без рабочего стола.
 - **Торрент-движок (WebTorrent):** качает куски последовательно, с приоритетом на текущую позицию. Перемотка переключает приоритет. Файл отдаётся по HTTP с поддержкой Range, и его забирает mpv.
 - **Библиотека загрузок:** всё, что смотрели или скачали, с паузой, «оставить», удалением и автоочисткой.
-- **Input: magnet links only.** Search and content providers (Internet Archive etc.) were built and then removed on the user's decision: no search, no .torrent URLs/files. The box does not integrate with any trackers or catalogues.
+- **Input: a magnet link or a .torrent file uploaded from the phone.** Search and content providers (Internet Archive etc.) were built and then removed on the user's decision: no search, no .torrent URLs. The box does not integrate with any trackers or catalogues. (.torrent upload was added later at the user's request: not every release has a magnet. It also makes web-seed-only torrents like Internet Archive's work, which time out as magnets.)
 
 ## Стек
 
@@ -139,7 +139,7 @@ tvbox/
   - `torrents/<infoHash>.bitfield`: which pieces are on disk (WebTorrent's `bitfield` add option). Saved every 30 s, when a file finishes, on `remove()` and `destroy()`; temp + rename, serialised per torrent (several files finishing at once raced on one temp file). With it WebTorrent trusts the data, spot-checks ≤ 2 pieces per file and re-hashes only on a mismatch: a torrent is ready in ~20 ms instead of minutes (first full check of a 32 GB series with 7.6 GB on the USB HDD: ~3 min).
   - `torrents/.clean-shutdown`: written by `destroy()`, consumed by `start()` (called from `Library.load()`). Bitfields are trusted only if it was there; otherwise (power cut: newest pieces may not be on disk yet) all `.bitfield` files are deleted and the data is re-hashed once.
   - `library.json`: see `Library`.
-- `add(magnetOrHash)`: magnet link (or bare info hash, used internally to reload) → ready `Torrent`. Anything else → 400 "Not a valid magnet link". The info hash is parsed first (`parse-torrent`), so an already loaded torrent is reused (WebTorrent refuses duplicates), and saved metadata is used when present. Added with `deselect: true`. Metadata timeout 90 s ("no peers found"), counted only until the `metadata` event: verifying data already on disk can take minutes and used to hit the timeout ("Torrent is not loaded" when resuming a big series).
+- `add(source)`: magnet link, .torrent contents (Buffer, from an upload) or a bare info hash (used internally to reload) → ready `Torrent`. Invalid → 400 "Not a valid magnet link" / "Not a valid .torrent file" (buffers ≤ 20 bytes are rejected: parse-torrent would read them as a raw info hash). The info hash is parsed first (`parse-torrent`), so an already loaded torrent is reused (WebTorrent refuses duplicates), and saved metadata is used when present. Added with `deselect: true`. Metadata timeout 90 s ("no peers found"), counted only until the `metadata` event: verifying data already on disk can take minutes and used to hit the timeout ("Torrent is not loaded" when resuming a big series).
 - Magnets need real BitTorrent peers for metadata. Torrents served only by web seeds (e.g. Internet Archive: HTTP only, no peers) time out as magnets.
 - `setSelection(infoHash, indexes)`: exactly these files download. Deselects first, then selects, because neighbouring files can share a boundary piece.
 - `streamUrl(infoHash, index)`: local HTTP server on `127.0.0.1` (random port), `/<infoHash>/<index>/<name>`. Single `Range` (206/416) and HEAD. Each Range read calls `file.createReadStream({start, end})`, which makes WebTorrent prioritise the pieces there, so seeking moves the download position. Strategy is WebTorrent's default `sequential`.
@@ -179,6 +179,7 @@ tvbox/
 - `index.js`: Fastify on `0.0.0.0:8080` (`PORT`, `HOST`, `LOG_LEVEL`, `TVBOX_CACHE` env; `--pi` → `PI_ARGS`).
   - Errors: `{error}` with the error's `statusCode` (400 validation / not a magnet, 404 unknown id or no video in torrent, 409 conflict, 507 no disk space), anything else 502 (e.g. "no peers found").
   - `POST /api/play {id, episode?} | {magnet}` → status (`magnet` must match `^magnet:\?`)
+  - `POST /api/play/torrent`, `POST /api/downloads/torrent`: the .torrent file as the raw body (`application/x-bittorrent` or `application/octet-stream`, ≤ 10 MB → else 413). Same results as the magnet routes.
   - `POST /api/control {action, value?}`: `play pause toggle seekBy seekTo volume volumeBy audio sub next prev` (`sub: null|"off"` disables) → `{ok}`
   - `POST /api/stop`, `GET /api/status`, `GET /api/tracks`
   - `GET /api/downloads` → items; `POST /api/downloads {magnet}` → 201 item; `PATCH /api/downloads/:id {paused?, keep?, wanted?: [episode positions]}` → item; `DELETE /api/downloads/:id` → 204
@@ -205,6 +206,7 @@ tvbox/
   - Green LCD with scanlines: VCR status word in 14-segment (PLAY / PAUS / LOAD / BUFF / STOP / ERR), tape counter in 7-segment with unlit "8" segments behind, Winamp-style scrolling title, green EQ bars from the logo (animated while playing). Tap the counter → time remaining.
   - Seek bar with the downloaded part of the current file shaded; volume bar in Winamp green → yellow → red.
   - VCR blue screen for "insert a tape" (idle / loading / error).
+  - New tape form (`MagnetForm`): magnet field or "Вибрати .torrent файл" (hidden `<input type=file accept=".torrent,application/x-bittorrent">`); a picked file shows as a chip (name, size, ✕) in place of the field; the client checks the extension and 10 MB. Checked with Puppeteer (`uploadFile`).
   - Series on the shelf: a summary line ("Вибрано 3 з 10 серій · 9.6 ГБ" / "Завантажуються всі серії" / "Жодна серія не вибрана"), a toggle "Серії: завантажувати N з M", "Усі" / "Жодної", and per episode a download tick (role=checkbox), state (✔ / % / —) and a separate ▶. Taps are kept locally and sent once after 0.4 s. After "На полицю" (from either tab) the app switches to the shelf and opens the new series' episode list.
   - Shelf = VHS cassettes: handwritten paper label, tape window whose reels show progress (tape moves left → right as it downloads, hubs spin while downloading), stickers REC / ПАУЗА / ЧЕКАЄ / ГРАЄ / ЗАПИСАНО, "keep" = record-protect tab, LED disk meter.
   - Colours from the logo (tokens in `app.css`): near-black background, chrome greys, LCD green, bolt amber for the main action, FLIX red, VCR blue.

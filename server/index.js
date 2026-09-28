@@ -52,6 +52,19 @@ app.setErrorHandler((err, req, reply) => {
 
 const magnet = { type: 'string', pattern: '^magnet:\\?' };
 
+// A .torrent file is sent as the raw request body (the phone uploads the file it picked)
+const TORRENT_TYPES = ['application/x-bittorrent', 'application/octet-stream'];
+const TORRENT_MAX_BYTES = 10 * 1024 * 1024;   // big series torrents list thousands of pieces
+app.addContentTypeParser(TORRENT_TYPES, { parseAs: 'buffer', bodyLimit: TORRENT_MAX_BYTES },
+  (req, body, done) => done(null, body));
+
+function torrentBody(req) {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) {
+    throw Object.assign(new Error('Send the .torrent file as the body (application/x-bittorrent)'), { statusCode: 400 });
+  }
+  return req.body;
+}
+
 // --- Playback ---
 
 // Body: { id, episode? } to play from the library, or { magnet } for a new one.
@@ -64,7 +77,14 @@ app.post('/api/play', {
     },
   },
 }, async (req) => {
-  await box.play(req.body);
+  const { id, episode, magnet: link } = req.body;
+  await box.play({ id, episode, magnet: link });
+  return box.status();
+});
+
+// Body: the .torrent file itself
+app.post('/api/play/torrent', async (req) => {
+  await box.play({ torrent: torrentBody(req) });
   return box.status();
 });
 
@@ -103,7 +123,14 @@ app.post('/api/downloads', {
   schema: { body: { type: 'object', required: ['magnet'], properties: { magnet } } },
 }, async (req, reply) => {
   reply.code(201);
-  return box.download(req.body);
+  return box.download({ magnet: req.body.magnet });
+});
+
+// Body: the .torrent file itself
+app.post('/api/downloads/torrent', async (req, reply) => {
+  const torrent = torrentBody(req);
+  reply.code(201);
+  return box.download({ torrent });
 });
 
 // Body: { paused?: boolean, keep?: boolean, wanted?: [episode positions to download] }

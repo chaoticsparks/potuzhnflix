@@ -61,9 +61,9 @@ export class TorrentEngine extends EventEmitter {
     }
   }
 
-  // Magnet link or info hash → ready Torrent (reuses a loaded one)
-  async add(magnetOrHash) {
-    const { id, infoHash } = await this.#resolve(magnetOrHash);
+  // Magnet link, info hash or the contents of a .torrent file (Buffer) → ready Torrent (reuses a loaded one)
+  async add(source) {
+    const { id, infoHash } = await this.#resolve(source);
     const loaded = this.get(infoHash);
     if (loaded) return loaded;
     if (!this.adding.has(infoHash)) {
@@ -147,16 +147,19 @@ export class TorrentEngine extends EventEmitter {
     await fs.writeFile(path.join(this.torrentsDir, CLEAN_MARKER), '').catch(() => {});
   }
 
-  async #resolve(magnetOrHash) {
+  async #resolve(source) {
     let infoHash;
     try {
-      ({ infoHash } = await parseTorrent(magnetOrHash));
+      // parse-torrent reads any 20-byte buffer as a raw info hash; a real .torrent is never that small
+      if (Buffer.isBuffer(source) && source.length <= 20) throw new Error('too small');
+      ({ infoHash } = await parseTorrent(source));
     } catch {
-      throw Object.assign(new Error('Not a valid magnet link'), { statusCode: 400 });
+      const what = Buffer.isBuffer(source) ? 'Not a valid .torrent file' : 'Not a valid magnet link';
+      throw Object.assign(new Error(what), { statusCode: 400 });
     }
     // Prefer saved metadata: works offline and skips the magnet metadata wait
     const saved = await fs.readFile(path.join(this.torrentsDir, `${infoHash}.torrent`)).catch(() => null);
-    return { id: saved ?? magnetOrHash, infoHash };
+    return { id: saved ?? source, infoHash };
   }
 
   async #add(id, infoHash) {

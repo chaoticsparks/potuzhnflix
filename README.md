@@ -62,7 +62,7 @@ Then type `load <path or URL>` to play a file, and `help` for the command list.
 
 ## Playing a magnet link
 
-The box works with magnet links only: there is no search.
+The box takes magnet links and .torrent files (in the phone remote: "Вибрати .torrent файл"); there is no search.
 
 ```bash
 npm run play -- "<magnet link>"
@@ -168,6 +168,7 @@ The remote uses this API; it also works with `curl`:
 | GET | `/api/status`, `/api/tracks` | |
 | GET | `/api/downloads` | list of downloads |
 | POST | `/api/downloads` | `{ "magnet": "magnet:?..." }`: download without playing |
+| POST | `/api/play/torrent`, `/api/downloads/torrent` | the .torrent file as the body (`Content-Type: application/x-bittorrent`, ≤ 10 MB) |
 | PATCH | `/api/downloads/:id` | `{ "paused": true }`, `{ "keep": true }` |
 | DELETE | `/api/downloads/:id` | deletes the files |
 | GET | `/api/storage` | free / total / used disk space and cleanup settings |

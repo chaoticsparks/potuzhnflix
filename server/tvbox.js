@@ -67,9 +67,9 @@ export class TvBox extends EventEmitter {
   }
 
   // Download without playing
-  download({ magnet }) {
+  download({ magnet, torrent }) {   // torrent: .torrent file contents (Buffer)
     this.#needLibrary();
-    return this.library.add(magnet);
+    return this.library.add(torrent ?? magnet);
   }
 
   downloads() {
@@ -92,11 +92,12 @@ export class TvBox extends EventEmitter {
     return this.library.storage();
   }
 
-  // Plays a library item ({ id, episode? }) or a new magnet link ({ magnet }, added to the library).
+  // Plays a library item ({ id, episode? }) or a new torrent — { magnet } or { torrent: .torrent file
+  // contents as a Buffer } — which is added to the library first.
   // `episode` defaults to the last one watched.
   // Resolves when mpv has started loading; the long part is torrent metadata.
-  async play({ id, episode, magnet }) {
-    if (!id && !magnet) throw httpError(400, 'id or magnet is required');
+  async play({ id, episode, magnet, torrent }) {
+    if (!id && !magnet && !torrent) throw httpError(400, 'id, magnet or a .torrent file is required');
     this.#needLibrary();
     const session = ++this.session;
     // Switching episodes of the same item keeps it marked as playing (no download reshuffle)
@@ -104,7 +105,7 @@ export class TvBox extends EventEmitter {
     this.#set({ phase: 'loading', title: id ? this.library.get(id)?.title ?? null : null, error: null });
 
     try {
-      const item = id ? this.library.get(id) : await this.library.add(magnet);
+      const item = id ? this.library.get(id) : await this.library.add(torrent ?? magnet);
       if (!item) throw httpError(404, `No such download: ${id}`);
       if (session !== this.session) return;
       if (!this.title) this.#set({ title: item.title });   // a new magnet: name known after metadata

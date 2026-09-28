@@ -13,7 +13,9 @@ export function clock(seconds) {
 export function size(bytes) {
   if (!bytes) return '0 МБ';
   const gb = bytes / 1024 ** 3;
-  return gb >= 1 ? `${gb.toFixed(gb >= 10 ? 0 : 1)} ГБ` : `${Math.round(bytes / 1024 ** 2)} МБ`;
+  if (gb >= 1) return `${gb.toFixed(gb >= 10 ? 0 : 1)} ГБ`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} МБ`;
+  return `${Math.max(1, Math.round(bytes / 1024))} КБ`;   // .torrent files
 }
 
 export function speed(bytesPerSecond) {

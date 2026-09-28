@@ -51,19 +51,19 @@ export class Library extends EventEmitter {
 
   // Starts (or reuses) a download; resolves once torrent metadata is known.
   // The videos to play are chosen by pickVideoFiles().
-  async add(magnet) {
+  async add(source) {   // magnet link or .torrent contents (Buffer)
     const claim = { infoHash: null };   // keeps #doSync from stopping the torrent before the item exists
     this.claims.add(claim);
     try {
-      return await this.#add(magnet, claim);
+      return await this.#add(source, claim);
     } finally {
       this.claims.delete(claim);
       this.#sync();   // drops the torrent again if the add failed and nothing else needs it
     }
   }
 
-  async #add(magnet, claim) {
-    const t = await this.engine.add(magnet);
+  async #add(source, claim) {
+    const t = await this.engine.add(source);
     claim.infoHash = t.infoHash;
 
     const chosen = pickVideoFiles(t.files);
