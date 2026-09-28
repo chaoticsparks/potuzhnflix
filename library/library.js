@@ -11,6 +11,9 @@ import { TorrentEngine, DEFAULT_CACHE_DIR, pickVideoFiles } from '../torrent/eng
 
 const DAY = 24 * 60 * 60 * 1000;
 const GB = 1024 ** 3;
+const RESUME_MIN_SECONDS = 20;      // shorter stops aren't worth resuming (likely an accidental tap)
+const COMPLETE_TAIL_SECONDS = 20;   // within this much of the end (or 5%, whichever is more) = watched
+const HISTORY_LIMIT = 200;          // oldest entries drop off beyond this
 
 export const DEFAULT_POLICY = {
   completedDays: 30,             // finished films: deleted this long after last watched (or finished)
@@ -29,6 +32,7 @@ export class Library extends EventEmitter {
     this.engine.on('error', (err) => this.emit('error', err));
     this.engine.on('file-done', (infoHash, index) => this.#onFileDone(infoHash, index));
     this.items = new Map();
+    this.history = [];              // watched titles, most recent first; survives item deletion
     this.playing = null;           // { id, episode } being played
     this.claims = new Set();       // adds in progress: { infoHash }
     this.syncing = Promise.resolve();
@@ -38,7 +42,9 @@ export class Library extends EventEmitter {
   async load() {
     await fs.mkdir(this.dir, { recursive: true });
     await this.engine.start();
-    for (const item of await this.#readSaved()) this.items.set(item.id, migrate(item));
+    const saved = await this.#readSaved();
+    for (const item of saved.items) this.items.set(item.id, migrate(item));
+    this.history = saved.history;
 
     await this.#deleteOrphans();
     await this.cleanup();
@@ -80,7 +86,7 @@ export class Library extends EventEmitter {
         infoHash: t.infoHash,
         title: t.name,
         files: chosen.map((f) => ({
-          index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false, wanted: true,
+          index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false, wanted: true, position: 0,
         })),
         episode: 0,             // last played entry of `files`
         state: 'downloading',   // downloading | paused | complete
@@ -205,6 +211,60 @@ export class Library extends EventEmitter {
     return this.view(item);
   }
 
+  // A playback tick, every ~20 s while playing: remembers where to resume, without touching history
+  // (so scrubbing around doesn't spam the "watched" log). Non-urgent save, like download progress.
+  saveProgress(id, episode, position, duration) {
+    const item = this.items.get(id);
+    const f = item?.files[episode];
+    if (!f) return;
+    f.position = resumePosition(position, duration);
+    this.#changed(false);
+  }
+
+  // A watch session ended (stop, switching episode/film, or the box shutting down): remembers where
+  // to resume, and logs the title to history — one entry per item, moved to the front, with enough to
+  // show it (and re-add it by magnet) even after the download itself is gone.
+  recordWatch(id, episode, position, duration) {
+    const item = this.items.get(id);
+    const f = item?.files[episode];
+    if (!f || position < RESUME_MIN_SECONDS) return;
+    f.position = resumePosition(position, duration);
+    const watched = f.position === 0 ? duration : f.position;   // 0 = finished: log the full length
+    this.history = this.history.filter((h) => h.id !== id);
+    this.history.unshift({
+      id,
+      infoHash: item.infoHash,
+      title: item.title,
+      episode: item.files.length > 1 ? { index: episode, count: item.files.length, name: f.name } : null,
+      position: watched,
+      duration: duration || null,
+      completed: f.position === 0,
+      watchedAt: Date.now(),
+    });
+    this.history.length = Math.min(this.history.length, HISTORY_LIMIT);
+    this.#changed();
+  }
+
+  // Most recent first; magnet lets a deleted title be added again (DHT/PEX find peers without a
+  // tracker), and inLibrary says whether "resume" or "download again" applies
+  getHistory() {
+    return this.history.map((h) => ({
+      ...h,
+      inLibrary: this.items.has(h.id),
+      magnet: `magnet:?xt=urn:btih:${h.infoHash}&dn=${encodeURIComponent(h.title)}`,
+    }));
+  }
+
+  removeHistory(id) {
+    this.history = this.history.filter((h) => h.id !== id);
+    this.#changed();
+  }
+
+  clearHistory() {
+    this.history = [];
+    this.#changed();
+  }
+
   // Kept items are never deleted automatically
   setKeep(id, keep) {
     const item = this.#get(id);
@@ -283,7 +343,7 @@ export class Library extends EventEmitter {
       episode: item.episode,
       files: item.files.map((f) => ({
         name: f.name, length: f.length, downloaded: f.downloaded,
-        progress: f.length ? f.downloaded / f.length : 0, done: f.done, wanted: f.wanted,
+        progress: f.length ? f.downloaded / f.length : 0, done: f.done, wanted: f.wanted, position: f.position,
       })),
       addedAt: item.addedAt,
       completedAt: item.completedAt,
@@ -451,7 +511,7 @@ export class Library extends EventEmitter {
       const tmp = `${this.file}.tmp`;
       const fh = await fs.open(tmp, 'w');
       try {
-        await fh.writeFile(JSON.stringify({ version: 2, items: [...this.items.values()] }, null, 2));
+        await fh.writeFile(JSON.stringify({ version: 3, items: [...this.items.values()], history: this.history }, null, 2));
         await fh.sync();
       } finally {
         await fh.close();
@@ -465,17 +525,18 @@ export class Library extends EventEmitter {
     return this.saving;
   }
 
-  // library.json → library.json.bak → rebuilt from the saved .torrent files. Never gives up:
-  // an empty library would make #deleteOrphans() erase every download.
+  // library.json → library.json.bak → rebuilt from the saved .torrent files (history is lost in this
+  // last case — it isn't saved anywhere else). Never gives up: an empty library would make
+  // #deleteOrphans() erase every download.
   async #readSaved() {
     for (const file of [this.file, `${this.file}.bak`]) {
       const json = await fs.readFile(file, 'utf8').catch(() => null);
       if (!json) continue;   // missing, or emptied by a power cut
       try {
-        const { items } = JSON.parse(json.replace(/^﻿/, ''));   // BOM: Windows editors add one
+        const { items, history } = JSON.parse(json.replace(/^﻿/, ''));   // BOM: Windows editors add one
         if (Array.isArray(items)) {
           if (file !== this.file) this.emit('error', new Error(`${this.file} was damaged; loaded the backup`));
-          return items;
+          return { items, history: Array.isArray(history) ? history : [] };
         }
       } catch {
         // try the next one
@@ -485,7 +546,7 @@ export class Library extends EventEmitter {
     if (rebuilt.length) {
       this.emit('error', new Error(`${this.file} was damaged; rebuilt ${rebuilt.length} download(s) from saved torrents`));
     }
-    return rebuilt;
+    return { items: rebuilt, history: [] };
   }
 
   // Every download keeps its metadata in torrents/<infoHash>.torrent; progress is found again
@@ -504,7 +565,7 @@ export class Library extends EventEmitter {
           infoHash: t.infoHash,
           title: t.name,
           files: chosen.map((f) => ({
-            index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false, wanted: true,
+            index: t.files.indexOf(f), name: f.name, path: f.path, length: f.length, downloaded: 0, done: false, wanted: true, position: 0,
           })),
           episode: 0,
           state: 'downloading',
@@ -543,8 +604,19 @@ function migrate(item) {
       episode: 0,
     };
   }
-  for (const f of item.files) f.wanted ??= true;
+  for (const f of item.files) {
+    f.wanted ??= true;
+    f.position ??= 0;
+  }
   return item;
+}
+
+// Where to resume a file: 0 (start over) if barely watched, or finished (within the tail margin of
+// the end — the greater of COMPLETE_TAIL_SECONDS or 5% of its length); otherwise the exact position.
+function resumePosition(position, duration) {
+  if (position < RESUME_MIN_SECONDS) return 0;
+  if (duration > 0 && duration - position <= Math.max(COMPLETE_TAIL_SECONDS, duration * 0.05)) return 0;
+  return position;
 }
 
 // Bytes still to download for the chosen episodes

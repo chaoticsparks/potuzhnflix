@@ -147,11 +147,17 @@ Wi‑Fi network. To get an app icon, use "Add to Home Screen" (Safari) / "Instal
 
 - **Пульт** (remote): a VCR deck. Display with the tape counter (tap it to switch to time remaining), seek bar,
   play/pause, ±10 s, previous/next episode, volume, audio and subtitle tracks, stop. When nothing
-  plays: the magnet form and "continue watching". Below: "Стан приставки", the box's CPU
-  temperature, power / overheating warnings, CPU, memory, network and uptime.
+  plays: the magnet form and "continue watching" (resumes exactly where it was left off). Below:
+  "Стан приставки", the box's CPU temperature, power / overheating warnings, CPU, memory, network
+  and uptime.
 - **Полиця** (shelf): every film as a VHS tape. The tape moves from the left reel to the right one
   as it downloads. Pause/resume a download, protect a tape from automatic erasing (the lock tab),
-  erase it, pick a series episode.
+  erase it, pick a series episode. Playback always resumes where it stopped (per episode); a title
+  watched through to the end starts over from the beginning next time.
+- **Історія переглядів** (watch history, below the shelf): everything watched recently, even after
+  its download is gone — with when, how far you got, and a button to either continue it (if it's
+  still on the shelf) or add it back by its magnet link (rebuilt from the torrent's info hash, no
+  tracker needed).
 
 The UI is in Ukrainian. Windows Firewall may ask to allow Node.js on first start: allow it on
 private networks, or the phone can't connect.
@@ -184,6 +190,8 @@ The remote uses this API; it also works with `curl`:
 | DELETE | `/api/downloads/:id` | deletes the files |
 | GET | `/api/storage` | free / total / used disk space and cleanup settings |
 | GET | `/api/health` | CPU temperature, undervoltage / overheating warnings, CPU, memory, network, uptime |
+| GET | `/api/history` | watched titles, most recent first, kept even after the download is deleted |
+| DELETE | `/api/history/:id`, `/api/history` | removes one entry, or clears all of them |
 | WS | `/ws` | pushes `{ "type": "status", ... }` (≤ 4/s) and `{ "type": "downloads", "items": [...] }` (≤ 1/s) |
 
 Control actions: `play`, `pause`, `toggle`, `seekBy`, `seekTo`, `volume`, `volumeBy`, `audio`, `sub`, `next`, `prev`.

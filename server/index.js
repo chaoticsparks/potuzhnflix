@@ -178,6 +178,20 @@ app.delete('/api/downloads/:id', async (req, reply) => {
 
 app.get('/api/storage', () => box.storage());
 
+// --- Watch history: survives the download itself being deleted ---
+
+app.get('/api/history', () => box.history());
+
+app.delete('/api/history/:id', (req, reply) => {
+  box.removeHistory(req.params.id);
+  reply.code(204);
+});
+
+app.delete('/api/history', (req, reply) => {
+  box.clearHistory();
+  reply.code(204);
+});
+
 // --- The box itself: temperature, power warnings, CPU, memory, network, uptime ---
 
 app.get('/api/health', () => health());

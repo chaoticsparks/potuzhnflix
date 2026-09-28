@@ -45,6 +45,21 @@ export function until(timestamp) {
   return `через ${days} ${plural(days, 'день', 'дні', 'днів')}`;
 }
 
+// "щойно" / "2 год тому" / "вчора" / "5 днів тому" — for the watch history
+export function ago(timestamp) {
+  const ms = Date.now() - timestamp;
+  if (ms < 60 * 1000) return 'щойно';
+  const minutes = Math.round(ms / (60 * 1000));
+  if (minutes < 60) return `${minutes} ${plural(minutes, 'хвилину', 'хвилини', 'хвилин')} тому`;
+  const hours = Math.round(ms / (60 * 60 * 1000));
+  if (hours < 24) return `${hours} ${plural(hours, 'годину', 'години', 'годин')} тому`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return 'вчора';
+  if (days < 30) return `${days} ${plural(days, 'день', 'дні', 'днів')} тому`;
+  const months = Math.round(days / 30);
+  return `${months} ${plural(months, 'місяць', 'місяці', 'місяців')} тому`;
+}
+
 // Torrent / file names for people: no video extension, dots and underscores → spaces
 export function prettyName(name) {
   return name.replace(/\.(mkv|mp4|m4v|avi|mov|webm|ogv|mpe?g|m2?ts)$/i, '').replace(/[._]+/g, ' ').trim();

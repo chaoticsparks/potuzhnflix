@@ -252,6 +252,7 @@
             <Icon name="play" size={18} />
             <span class="continue-text">
               Продовжити «{prettyName(recent.title)}»{#if recent.files.length > 1}, серія {recent.episode + 1}{/if}
+              {#if recent.files[recent.episode].position > 0} · {clock(recent.files[recent.episode].position)}{/if}
             </span>
           </button>
         {/if}

@@ -5,7 +5,7 @@
   import Icon from './Icon.svelte';
   import { api } from '../lib/api.js';
   import { toast } from '../lib/toast.svelte.js';
-  import { size, speed, percent, until, plural, prettyName } from '../lib/format.js';
+  import { size, speed, percent, until, plural, prettyName, clock } from '../lib/format.js';
 
   // open: a series just added to the shelf — show its episode choice right away
   let { item, onPlay = () => {}, open = false } = $props();
@@ -89,6 +89,9 @@
     }
   }
 
+  // The resume point for whichever episode "Дивитися" would open (the last one played)
+  const resumeFile = $derived(item.files[item.episode]);
+
   const play = (episode) => run(() => api.play(episode === undefined ? { id: item.id } : { id: item.id, episode }), onPlay);
   const togglePause = () => run(() => api.update(item.id, { paused: item.state !== 'paused' }));
   const toggleKeep = () => run(() => api.update(item.id, { keep: !item.keep }));
@@ -144,7 +147,10 @@
   <div class="actions">
     <button class="chrome btn small hot play" disabled={busy || item.playing} onclick={() => play()}>
       <Icon name="play" size={16} />
-      {item.playing ? 'Грає' : series && item.lastPlayedAt ? `Серія ${item.episode + 1}` : 'Дивитися'}
+      {item.playing ? 'Грає'
+        : series && item.lastPlayedAt ? `Серія ${item.episode + 1}`
+        : resumeFile.position > 0 ? 'Продовжити' : 'Дивитися'}
+      {#if !item.playing && resumeFile.position > 0}<span class="resume tiny">{clock(resumeFile.position)}</span>{/if}
     </button>
     {#if item.state !== 'complete'}
       <button class="chrome btn small" disabled={busy || item.playing} onclick={togglePause}
@@ -191,6 +197,7 @@
                 <span class="name">{prettyName(f.name)}</span>
                 <span class="tiny ep-state">
                   {f.done ? '✔' : f.progress > 0 ? percent(f.progress) : wanted[i] ? '0%' : '—'}
+                  {#if f.position > 0}· {clock(f.position)}{/if}
                 </span>
               </button>
               <button class="watch" disabled={busy} onclick={() => play(i)} aria-label="Дивитися серію {i + 1}">
@@ -317,6 +324,7 @@
 
   .actions { display: flex; gap: 8px; }
   .actions .play { flex: 1; }
+  .resume { opacity: 0.75; }
 
   .confirm {
     padding: 10px;

@@ -12,6 +12,7 @@ import { Cec } from './cec.js';
 const run = promisify(execFile);
 const DISPLAY_RETRY_MS = 30 * 1000;
 const STORAGE_RETRY_MS = 30 * 1000;
+const POSITION_SAVE_MS = 20 * 1000;   // resume point saved this often while playing (crash safety)
 const NO_DISK = 'Film disk is not connected';
 
 // Control actions accepted by control(); value is validated per action
@@ -88,6 +89,21 @@ export class TvBox extends EventEmitter {
     return this.libraryReady ? this.library.list() : [];
   }
 
+  // Watched titles, most recent first; survives the download itself being deleted
+  history() {
+    return this.libraryReady ? this.library.getHistory() : [];
+  }
+
+  removeHistory(id) {
+    this.#needLibrary();
+    this.library.removeHistory(id);
+  }
+
+  clearHistory() {
+    this.#needLibrary();
+    this.library.clearHistory();
+  }
+
   // { paused?, keep?, wanted?: episode positions to download }
   async updateDownload(id, { paused, keep, wanted }) {
     this.#needLibrary();
@@ -111,6 +127,7 @@ export class TvBox extends EventEmitter {
   async play({ id, episode, magnet, torrent }) {
     if (!id && !magnet && !torrent) throw httpError(400, 'id, magnet or a .torrent file is required');
     this.#needLibrary();
+    await this.#recordCurrent();   // remember where whatever was playing left off, before it changes
     const session = ++this.session;
     // Switching episodes of the same item keeps it marked as playing (no download reshuffle)
     if (!id || id !== this.current) await this.#release();
@@ -133,9 +150,11 @@ export class TvBox extends EventEmitter {
       const player = await this.#ensurePlayer();
       if (session !== this.session) return;
       const playing = this.library.get(item.id);
-      const name = playing.files.length > 1 ? `${playing.title} · ${playing.files[playing.episode].name}` : playing.title;
-      await player.load(source, { title: name });
+      const file = playing.files[playing.episode];
+      const name = playing.files.length > 1 ? `${playing.title} · ${file.name}` : playing.title;
+      await player.load(source, { title: name, position: file.position });
       this.#set({ phase: 'playing', title: playing.title });
+      this.#startPositionTimer();
     } catch (err) {
       if (session !== this.session) return;   // cancelled by stop() or a newer play()
       await this.#release();
@@ -158,6 +177,8 @@ export class TvBox extends EventEmitter {
 
   // Stops playback; the film stays in the library and keeps downloading if unfinished
   async stop() {
+    await this.#recordCurrent();   // remember where this one left off, before mpv resets its position
+    clearInterval(this.positionTimer);
     this.session++;
     await this.player?.stop().catch(() => {});
     await this.#release();
@@ -224,6 +245,8 @@ export class TvBox extends EventEmitter {
     clearTimeout(this.displayRetry);
     clearTimeout(this.storageRetry);
     clearInterval(this.mountWatch);
+    clearInterval(this.positionTimer);
+    await this.#recordCurrent();   // a graceful restart/deploy shouldn't lose the resume point
     this.session++;
     await this.player?.quit();
     if (this.libraryReady) await this.library.close();
@@ -277,6 +300,28 @@ export class TvBox extends EventEmitter {
     await this.library.release(id);
   }
 
+  // Logs the currently-playing file's position to history and remembers it for resuming, right
+  // before it stops being current (a new play(), an explicit stop, or the box shutting down)
+  async #recordCurrent() {
+    if (this.phase !== 'playing' || !this.current || !this.player) return;
+    const item = this.library.get(this.current);
+    if (!item) return;
+    const { position, duration } = this.player.state;
+    this.library.recordWatch(this.current, item.episode, position ?? 0, duration ?? 0);
+  }
+
+  // Saves the resume point every 20 s while playing, so a power cut doesn't lose more than that
+  #startPositionTimer() {
+    clearInterval(this.positionTimer);
+    this.positionTimer = setInterval(() => {
+      if (this.phase !== 'playing' || !this.current || !this.player) return;
+      const item = this.library.get(this.current);
+      if (!item) return;
+      const { position, duration } = this.player.state;
+      this.library.saveProgress(this.current, item.episode, position ?? 0, duration ?? 0);
+    }, POSITION_SAVE_MS);
+  }
+
   // Someone used the remote: bring the TV back from the screen saver
   wake() {
     this.tv?.wake();
@@ -295,13 +340,15 @@ export class TvBox extends EventEmitter {
       this.emit('mpv-log', line);
       if (/Error opening\/initializing the VO window/.test(line)) this.#retryDisplay(player);
     });
-    player.on('exit', () => {
+    player.on('exit', async () => {
       tv.stop();
-      if (this.player === player) {
+      const wasCurrent = this.player === player;
+      // stop() while this.player still points here, so it can record where playback left off
+      if (wasCurrent && (this.phase === 'playing' || this.phase === 'loading')) await this.stop().catch(() => {});
+      if (wasCurrent) {
         this.player = null;
         this.tv = null;
       }
-      if (this.phase === 'playing' || this.phase === 'loading') this.stop();
     });
     await player.start();
     this.player = player;

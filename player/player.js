@@ -165,11 +165,15 @@ export class MpvPlayer extends EventEmitter {
   setProperty(name, value) { return this.command('set_property', name, value); }
 
   // --- Playback control ---
-  async load(url, { title } = {}) {
+  // position: where to start (seconds), for resuming a file left off partway through
+  async load(url, { title, position } = {}) {
     await this.setProperty('force-media-title', title ?? '');
     // mpv keeps `pause` across files: a film paused before Stop would make the next one start paused
     await this.setProperty('pause', false);
-    return this.command('loadfile', url, 'replace');
+    // Since mpv added insert-at/insert-at-play (0.37+), loadfile takes a playlist index before
+    // options — -1 (mpv's own placeholder) when, as here, it doesn't apply to "replace".
+    const args = position > 0 ? ['loadfile', url, 'replace', -1, `start=${position}`] : ['loadfile', url, 'replace'];
+    return this.command(...args);
   }
   play() { return this.setProperty('pause', false); }
   pause() { return this.setProperty('pause', true); }

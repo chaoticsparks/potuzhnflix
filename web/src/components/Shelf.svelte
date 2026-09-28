@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import Tape from './Tape.svelte';
   import MagnetForm from './MagnetForm.svelte';
+  import History from './History.svelte';
   import { live } from '../lib/live.svelte.js';
   import { api } from '../lib/api.js';
   import { size } from '../lib/format.js';
@@ -74,6 +75,8 @@
     </div>
   {/if}
 </section>
+
+<History {onPlay} />
 
 <style>
   section { display: grid; gap: 12px; }
