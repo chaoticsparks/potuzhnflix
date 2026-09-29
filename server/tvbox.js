@@ -99,11 +99,6 @@ export class TvBox extends EventEmitter {
     this.library.removeHistory(id);
   }
 
-  clearHistory() {
-    this.#needLibrary();
-    this.library.clearHistory();
-  }
-
   // { paused?, keep?, wanted?: episode positions to download }
   async updateDownload(id, { paused, keep, wanted }) {
     this.#needLibrary();

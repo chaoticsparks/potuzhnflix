@@ -40,6 +40,5 @@ export const api = {
   health: () => call('GET', '/api/health'),
   history: () => call('GET', '/api/history'),
   removeHistory: (id) => call('DELETE', `/api/history/${encodeURIComponent(id)}`),
-  clearHistory: () => call('DELETE', '/api/history'),
   power: (action) => call('POST', '/api/power', { action }),   // 'poweroff' | 'reboot' (the Pi only)
 };

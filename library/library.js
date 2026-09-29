@@ -260,11 +260,6 @@ export class Library extends EventEmitter {
     this.#changed();
   }
 
-  clearHistory() {
-    this.history = [];
-    this.#changed();
-  }
-
   // Kept items are never deleted automatically
   setKeep(id, keep) {
     const item = this.#get(id);

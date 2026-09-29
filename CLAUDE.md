@@ -1,105 +1,105 @@
-# ПотужнFLIX: приставка для телевизора
+# ПотужнFLIX: a TV set-top box
 
-Контекст проекта, перенесённый из чата в claude.ai. Этот файл лежит в корне репозитория, и Claude Code читает его автоматически.
+Project context carried over from a chat on claude.ai. This file lives at the repo root, and Claude Code reads it automatically.
 
-## Идея
+## Idea
 
-Самодельная приставка, которая подключается к телевизору по HDMI и выходит в интернет через домашний Wi‑Fi.
+A homemade set-top box that connects to the TV over HDMI and reaches the internet over the home Wi-Fi.
 
 **Name: «ПотужнFLIX»** (logo: `logo.png` in the repo root). UI language: Ukrainian.
 
-- **Управление:** с телефона через простое PWA. Пользователь вставляет magnet-ссылку или выбирает .torrent файл и нажимает «Смотреть» или «Скачать».
-- **Воспроизведение:** приставка скачивает фильм по торренту во временное хранилище и сразу начинает показ, не дожидаясь полной загрузки. Торрент с несколькими видео (сериал) играет как плейлист.
-- **Видео идёт по HDMI прямо на телевизор.** На телефон видео НЕ передаётся: телефон работает только как пульт (пауза, громкость, перемотка, дорожки).
-- **По сети между телефоном и приставкой** ходят только команды и статус. Весь тяжёлый трафик идёт из интернета в приставку, а оттуда по HDMI в телевизор.
+- **Control:** from the phone through a simple PWA. The user pastes a magnet link or picks a .torrent file and taps "Watch" or "Download".
+- **Playback:** the box downloads the film over the torrent into temporary storage and starts playing right away, without waiting for the full download. A torrent with several videos (a series) plays as a playlist.
+- **Video goes over HDMI straight to the TV.** No video is sent to the phone: the phone works only as a remote (pause, volume, seeking, tracks).
+- **Only commands and status travel over the network** between the phone and the box. All the heavy traffic goes from the internet to the box, and from there over HDMI to the TV.
 
-## Архитектура
+## Architecture
 
 ```
-Телефон (PWA) ──REST/WebSocket──► Backend на приставке
+Phone (PWA) ──REST/WebSocket──► Backend on the box
                                      │
                      ┌───────────────┴────────────────┐
                      ▼                                ▼
-          Библиотека загрузок ──► Торрент-движок ──HTTP (localhost)──► mpv ──HDMI──► ТВ
-      (library.json, очистка)   (последовательная загрузка,
-                                 Range-запросы, кэш на USB)
+           Download library ──► Torrent engine ──HTTP (localhost)──► mpv ──HDMI──► TV
+      (library.json, cleanup)  (sequential download,
+                                Range requests, cache on a USB disk)
 ```
 
-- **mpv:** управляется через JSON IPC-сокет. На Pi выводит видео напрямую в DRM/KMS, без рабочего стола.
-- **Торрент-движок (WebTorrent):** качает куски последовательно, с приоритетом на текущую позицию. Перемотка переключает приоритет. Файл отдаётся по HTTP с поддержкой Range, и его забирает mpv.
-- **Библиотека загрузок:** всё, что смотрели или скачали, с паузой, «оставить», удалением и автоочисткой.
+- **mpv:** controlled over a JSON IPC socket. On the Pi it outputs video straight to DRM/KMS, with no desktop.
+- **Torrent engine (WebTorrent):** downloads pieces sequentially, prioritising the current position. Seeking switches the priority. The file is served over HTTP with Range support, and mpv picks it up.
+- **Download library:** everything watched or downloaded, with pause, "keep", delete and auto-cleanup.
 - **Input: a magnet link or a .torrent file uploaded from the phone.** Search and content providers (Internet Archive etc.) were built and then removed on the user's decision: no search, no .torrent URLs. The box does not integrate with any trackers or catalogues. (.torrent upload was added later at the user's request: not every release has a magnet. It also makes web-seed-only torrents like Internet Archive's work, which time out as magnets.)
 
-## Стек
+## Stack
 
-Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebSocket, PWA на Svelte, systemd, Avahi (mDNS, `tvbox.local`).
+Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebSocket, a Svelte PWA, systemd, Avahi (mDNS, `tvbox.local`).
 
-## Железо (решено)
+## Hardware (decided)
 
-Цель: Full HD. От 4K отказались: дорого, и фильмы качаются медленнее.
+Target: Full HD. 4K was ruled out: expensive, and films download more slowly.
 
-- **Raspberry Pi 4 Model B Starter Kit, 4 ГБ (официальный).**
-  - В комплекте: плата, официальный БП USB‑C 5 В/3 А, кабель micro‑HDMI, официальный корпус, microSD SanDisk 32 ГБ.
-  - Pi 4 аппаратно декодирует H.264 и H.265 в 1080p.
-  - Видео выводится через порт HDMI0, ближний к разъёму питания.
-- **Lexar JumpDrive D500, 128 ГБ.**
-  - Твердотельный USB-накопитель (USB 3.2 Gen 1, запись до 360 МБ/с), подключается в синий порт USB 3.0.
-  - Хранит временные файлы торрентов.
-- **Наклеиваемые радиаторы.** Официальный корпус не охлаждается, при перегреве можно добавить официальный Case Fan.
-- **Опционально:** Ethernet-кабель, картридер для microSD.
-- **Не нужны:** клавиатура, мышь, монитор. Настройка идёт headless по SSH.
-- **Что рассматривали и отклонили:**
-  - Intel N100 / Radxa X4: нужны только для 4K.
-  - Raspberry Pi 5: не умеет аппаратно декодировать H.264.
-  - Безымянный «Lenovo SSD» с Prom: подделка, характеристики противоречат сами себе.
+- **Raspberry Pi 4 Model B Starter Kit, 4 GB (official).**
+  - Included: the board, the official 5V/3A USB-C power supply, a micro-HDMI cable, the official case, a 32 GB SanDisk microSD card.
+  - The Pi 4 decodes H.264 and H.265 in hardware at 1080p.
+  - Video comes out of the HDMI0 port, the one nearest the power connector.
+- **A USB storage drive (128 GB Lexar JumpDrive D500 in this build).**
+  - A solid-state USB drive (USB 3.2 Gen 1, up to 360 MB/s write), plugs into the blue USB 3.0 port.
+  - Holds the downloads (the box's library). Any USB disk works — see "Storage" in the setup section; the box also runs fine on an NTFS or exFAT drive someone already has.
+- **Stick-on heatsinks.** The official case isn't cooled; the official Case Fan can be added if it overheats.
+- **Optional:** an Ethernet cable, a microSD card reader.
+- **Not needed:** keyboard, mouse, monitor. Setup is headless, over SSH.
+- **Considered and rejected:**
+  - Intel N100 / Radxa X4: only needed for 4K.
+  - Raspberry Pi 5: can't decode H.264 in hardware.
+  - An unbranded "Lenovo SSD" from a marketplace listing: a counterfeit, its own specs contradicted each other.
 
-## План по этапам
+## Stage plan
 
-1. **Плеер (mpv).** ✅ ГОТОВО
-   - Управление через IPC: пауза, громкость, перемотка, дорожки, стоп.
-   - Состояние (позиция, длительность, громкость, буферизация) обновляется в реальном времени.
-   - Экран ожидания на ТВ: ✅ synthwave idle scene, VCR blue screen for loading / errors, VCR OSD (see `player/tvscreen.js`).
-2. **Торрент-движок.** ✅ POC DONE (`npm run play -- "<magnet>"`, see `torrent/`, `library/`)
-   - Принимает magnet-ссылку, сам выбирает, что играть: фильм, фильм из частей или серии сериала (плейлист).
-   - Качает последовательно, при перемотке меняет приоритет кусков.
-   - Раздаёт файл локальным HTTP-сервером с поддержкой Range.
-   - Отдаёт статус: процент загрузки, скорость, пиры.
-   - Чистит кэш после просмотра или при заполнении диска. → Done as a download library: play or download-only, pause/resume, keep, delete, auto-cleanup by age and free space (see `library/`).
-   - Результат этапов 1–2: фильм по magnet-ссылке играет из командной строки.
-3. ~~**Поиск.**~~ Dropped: built (Internet Archive + magnet providers), then removed. Input is magnet links only. Stage numbers are kept as they are.
+1. **Player (mpv).** ✅ DONE
+   - Control over IPC: pause, volume, seeking, tracks, stop.
+   - State (position, duration, volume, buffering) updates in real time.
+   - TV idle screen: ✅ synthwave idle scene, VCR blue screen for loading / errors, VCR OSD (see `player/tvscreen.js`).
+2. **Torrent engine.** ✅ POC DONE (`npm run play -- "<magnet>"`, see `torrent/`, `library/`)
+   - Takes a magnet link and picks what to play itself: a film, a film in parts, or a series' episodes (as a playlist).
+   - Downloads sequentially; seeking changes the pieces' priority.
+   - Serves the file via a local HTTP server with Range support.
+   - Reports status: download percentage, speed, peers.
+   - Clears the cache after watching or when the disk fills up. → Done as a download library: play or download-only, pause/resume, keep, delete, auto-cleanup by age and free space (see `library/`).
+   - Result of stages 1–2: a film plays from the command line, given a magnet link.
+3. ~~**Search.**~~ Dropped: built (Internet Archive + magnet providers), then removed. Input is magnet links only. Stage numbers are kept as they are.
 4. **Backend.** Fastify. ✅ POC DONE (`npm start`, see `server/`; REST under `/api/`)
    - REST: `/api/play`, `/api/control`, `/api/stop`, `/api/downloads`, `/api/storage`.
-   - WebSocket со статусом и списком загрузок.
-   - Раздаёт PWA.
-   - Связывает библиотеку загрузок → mpv.
-5. **PWA-пульт.** ✅ DONE (`npm run build`, see `web/`). Not yet tried on a real phone.
-   - Поле для magnet-ссылки: «Смотреть» / «Скачать».
-   - Экран пульта: пауза, ползунок перемотки, громкость, ±10 с, субтитры и аудиодорожки. For series: episode name, next / previous.
+   - WebSocket with status and the list of downloads.
+   - Serves the PWA.
+   - Connects the download library → mpv.
+5. **PWA remote.** ✅ DONE (`npm run build`, see `web/`). Not yet tried on a real phone.
+   - A field for the magnet link: "Watch" / "Download".
+   - The remote screen: pause, a seek slider, volume, ±10 s, subtitles and audio tracks. For series: episode name, next / previous.
    - Downloads screen: list with progress / state / expiry, pause/resume, keep, delete, free disk space. Series: episode list with per-episode progress, "continue from episode N".
-   - Устанавливается на главный экран телефона.
-   - Результат: полностью рабочий пульт с телефона (пока на компьютере).
-6. **Перенос на Pi.** ← IN PROGRESS: runs on the Pi as a service; blue screen, playback (smooth, hardware decoding), HDMI sound, phone remote and temperature confirmed by the user on the real TV; downloads now on the Lexar. Left: a DHCP reservation (given to the user, not yet confirmed done); optional heatsinks, a real 1080p HEVC film.
-   - Запись ОС, Wi‑Fi, SSH, монтирование Lexar.
+   - Installs to the phone's home screen.
+   - Result: a fully working phone remote (on a computer so far).
+6. **Moving to the Pi.** ← IN PROGRESS: runs on the Pi as a service; blue screen, playback (smooth, hardware decoding), HDMI sound, phone remote and temperature confirmed by the user on the real TV; downloads now on a dedicated USB drive. Left: a DHCP reservation (given to the user, not yet confirmed done); optional heatsinks, a real 1080p HEVC film.
+   - Flashing the OS, Wi-Fi, SSH, mounting the download disk.
    - mDNS `tvbox.local`.
-   - systemd-сервисы с автозапуском и перезапуском при сбое.
-   - Настройка вывода mpv в DRM, проверка нагрева.
-   - Результат: готовая приставка.
-7. **Улучшения (по желанию).**
-   - ~~HDMI-CEC: автовключение ТВ и переключение входа.~~ ✅ DONE (see `server/cec.js`): auto power-on + input switch at boot and on wake from the screen saver; the TV goes to standby when the screen saver starts.
-   - ~~Продолжение просмотра с места остановки, история.~~ ✅ DONE (see `library.js`'s resume position / history): resumes any file exactly where it stopped; a "watch history" survives the download itself being deleted, with a one-tap re-download by magnet.
-   - Автопоиск субтитров.
-   - ~~Индикатор буферизации на ТВ.~~ ✅ DONE: "ЗАВАНТАЖЕННЯ..." now says why (download speed, or "no peers"), see `#vcrOsd()` in `tvscreen.js`.
+   - systemd services with autostart and restart on failure.
+   - Setting up mpv output to DRM, checking the temperature.
+   - Result: a finished box.
+7. **Improvements (optional).**
+   - ~~HDMI-CEC: auto power-on and input switching for the TV.~~ ✅ DONE (see `server/cec.js`): auto power-on + input switch at boot and on wake from the screen saver; the TV goes to standby when the screen saver starts.
+   - ~~Resume playback from where it stopped, a watch history.~~ ✅ DONE (see `library.js`'s resume position / history): resumes any file exactly where it stopped; a "watch history" survives the download itself being deleted, with a one-tap re-download by magnet.
+   - Automatic subtitle search.
+   - ~~A buffering indicator on the TV.~~ ✅ DONE: "ЗАВАНТАЖЕННЯ..." now says why (download speed, or "no peers"), see `#vcrOsd()` in `tvscreen.js`.
 
-Этапы 1–5 разрабатываются на обычном компьютере, пока едет железо.
+Stages 1–5 are developed on a regular computer while the hardware is in transit.
 
-## Текущее состояние кода
+## Current state of the code
 
 ```
 tvbox/
   CLAUDE.md
   README.md           # install and run instructions (mpv, Node.js)
   logo.png            # the logo, source for the icons in web/public
-  package.json        # "type": "module", скрипты: player / player:pi / play / play:pi / start / start:pi / build / dev:web
+  package.json        # "type": "module", scripts: player / player:pi / play / play:pi / start / start:pi / build / dev:web
   deploy/
     setup-pi.sh       # one-time root setup on the Pi (run by the user with sudo; idempotent)
     format-disk.sh    # erases a disk, ext4, with an empty <folder> ready for use-disk.sh
@@ -110,9 +110,9 @@ tvbox/
   scripts/
     tv-fonts.mjs      # WOFF → TTF for mpv's OSD (runs in `npm run build`), output player/fonts (git-ignored)
   player/
-    player.js         # класс MpvPlayer (EventEmitter)
+    player.js         # class MpvPlayer (EventEmitter)
     tvscreen.js       # TvScreen: the TV picture around the film (synthwave idle, VCR blue screen, VCR OSD), ASS via osd-overlay
-    cli.js            # консольный пульт для ручной проверки
+    cli.js            # a console remote for manual testing
   torrent/
     engine.js         # TorrentEngine: many torrents in one WebTorrent client, per-file selection, HTTP streaming
     cli.js            # magnet [--episode n] → library → mpv, auto-advances episodes, prints download status
@@ -227,30 +227,30 @@ tvbox/
 - Mobile first, max width 480 px, safe-area insets, touch targets ≥ 44 px, `prefers-reduced-motion` stops animations, `aria-label`s on icon buttons.
 - Checked with Edge (Puppeteer, 390×844 mobile emulation) against the real backend + mpv: all screens render without horizontal overflow; pause / play / ±10 s / next episode / volume and seek sliders / stop / magnet validation / "continue watching" work.
 
-### `player/player.js`, класс `MpvPlayer`
+### `player/player.js`, class `MpvPlayer`
 
-- **Запуск:** `start()` запускает mpv со следующими флагами:
-  - `--idle=yes --force-window=yes --input-terminal=no --msg-level=all=warn --hwdec=auto-safe --input-ipc-server=<сокет>`
+- **Startup:** `start()` launches mpv with the following flags:
+  - `--idle=yes --force-window=yes --input-terminal=no --msg-level=all=warn --hwdec=auto-safe --input-ipc-server=<socket>`
   - mpv warnings/errors (stdout/stderr) are emitted as `log` events; `TvBox` → `mpv-log` → the server log. With `--no-terminal` they were lost (the desktop holding DRM went unnoticed).
-  - Сокет: `$TMPDIR/tvbox-mpv.sock`, на Windows — `\\.\pipe\tvbox-mpv`.
-  - После подключения подписывается на свойства через `observe_property`.
-- **Методы:**
+  - Socket: `$TMPDIR/tvbox-mpv.sock`, on Windows — `\\.\pipe\tvbox-mpv`.
+  - After connecting, it subscribes to properties via `observe_property`.
+- **Methods:**
   - `load(url, {title, position})`, `play()`, `pause()`, `togglePause()`
   - `seekBy(s)`, `seekTo(s)`
-  - `setVolume(v)` (значение 0–100), `changeVolume(d)`
+  - `setVolume(v)` (a value 0–100), `changeVolume(d)`
   - `stop()`
-  - `tracks()` возвращает `{audio, subtitles}`; `setAudioTrack(id)`, `setSubtitleTrack(id|null)`
+  - `tracks()` returns `{audio, subtitles}`; `setAudioTrack(id)`, `setSubtitleTrack(id|null)`
   - `quit()`
-  - Низкоуровневые: `command(...args)`, `commandNamed({name, ...})` (named-argument commands like `osd-overlay`), `getProperty()`, `setProperty()`
+  - Low-level: `command(...args)`, `commandNamed({name, ...})` (named-argument commands like `osd-overlay`), `getProperty()`, `setProperty()`
   - `load()` also sets `pause=false`: mpv keeps `pause` across files, so a film paused before Stop made the next one start paused.
   - `load()`'s `position` (seconds) resumes a file left off partway through: `loadfile url replace -1 start=<position>` (only sent when > 0). mpv 0.37+ inserted a playlist-index argument before `loadfile`'s options (for `insert-at`/`insert-at-play`), so the 3-argument form (`loadfile url replace start=…`) now fails with "invalid parameter" — `-1` is mpv's own placeholder for "index doesn't apply" (irrelevant to `replace`). Found and checked with mpv 0.41 (Windows) against the actual command signature; the Pi's mpv 0.40 already has this too (added between 0.36 and 0.37, per mpv's `DOCS/interface-changes.rst`).
-- **Состояние:** `player.state = {paused, position, duration, volume, idle, title, buffering}`.
-- **События:**
-  - `state` при каждом изменении отслеживаемого свойства;
-  - события mpv: `file-loaded`, `end-file` и другие;
-  - `exit` при закрытии mpv.
+- **State:** `player.state = {paused, position, duration, volume, idle, title, buffering}`.
+- **Events:**
+  - `state` on every change of an observed property;
+  - mpv's own events: `file-loaded`, `end-file` and others;
+  - `exit` when mpv closes.
 - **`PI_ARGS`:** settings for the Pi, see "mpv on the Pi" in the Raspberry Pi section.
-- **Статус проверки:** работает с реальным mpv на Windows и на Pi (через backend).
+- **Tested:** works with real mpv on Windows and on the Pi (through the backend).
 
 ### `player/tvscreen.js`, class `TvScreen`: the TV picture (old VHS TV)
 
@@ -302,9 +302,9 @@ tvbox/
   - Fix: `setup-pi.sh` appends `video=HDMI-A-1:1920x1080@60D` to `/boot/firmware/cmdline.txt` (D = force the output on); needs a reboot.
   - Safety net in `TvBox`: mpv logging "Error opening/initializing the VO window" → quit and restart it every 30 s (`DISPLAY_RETRY_MS`) until the screen is there (checked on the Pi with the TV off).
 
-## Договорённости
+## Agreements
 
 - Communicate with the user in English.
 - Code in Node.js, ESM. All code comments in English.
-- Пользователь живёт в Украине, железо покупает там (Prom, Rozetka и др.).
-- Backend будет раздавать статус через WebSocket. Событие `state` из MpvPlayer приходит часто (при каждом обновлении `time-pos`), поэтому перед отправкой на телефон его нужно ограничивать по частоте.
+- The user lives in Ukraine and buys hardware there (Prom, Rozetka, etc.).
+- The backend serves status over WebSocket. The `state` event from MpvPlayer fires often (on every `time-pos` update), so it needs to be rate-limited before sending to the phone.

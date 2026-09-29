@@ -187,11 +187,6 @@ app.delete('/api/history/:id', (req, reply) => {
   reply.code(204);
 });
 
-app.delete('/api/history', (req, reply) => {
-  box.clearHistory();
-  reply.code(204);
-});
-
 // --- The box itself: temperature, power warnings, CPU, memory, network, uptime ---
 
 app.get('/api/health', () => health());

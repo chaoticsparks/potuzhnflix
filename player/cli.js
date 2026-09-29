@@ -16,43 +16,43 @@ const fmt = (s) => {
 
 const status = () => {
   const s = player.state;
-  if (s.idle) return 'Ничего не играет';
+  if (s.idle) return 'Nothing is playing';
   return `${s.paused ? '⏸' : '▶'} ${fmt(s.position)} / ${fmt(s.duration)}` +
-    ` | громкость ${Math.round(s.volume)}` +
-    (s.buffering ? ' | буферизация…' : '') +
+    ` | volume ${Math.round(s.volume)}` +
+    (s.buffering ? ' | buffering…' : '') +
     ` | ${s.title ?? ''}`;
 };
 
 const HELP = `
-Команды:
-  load <url или путь>  открыть видео
-  p                    пауза / продолжить
-  > / <                вперёд / назад на 10 с
-  >> / <<              вперёд / назад на 60 с
-  seek <сек>           перейти к позиции
-  + / -                громкость ±5
-  vol <0-100>          установить громкость
-  tracks               аудиодорожки и субтитры
-  audio <id>           выбрать аудиодорожку
-  sub <id|off>         выбрать субтитры
-  s                    статус
-  stop                 остановить
-  help                 эта подсказка
-  q                    выход
+Commands:
+  load <url or path>   open a video
+  p                    pause / resume
+  > / <                seek ±10 s
+  >> / <<              seek ±60 s
+  seek <sec>           seek to a position
+  + / -                volume ±5
+  vol <0-100>          set the volume
+  tracks               audio tracks and subtitles
+  audio <id>           pick an audio track
+  sub <id|off>         pick a subtitle track
+  s                    status
+  stop                 stop
+  help                 this message
+  q                    quit
 `;
 
-player.on('file-loaded', () => console.log('\n✓ Файл загружен'));
-player.on('end-file', (e) => console.log(`\n■ Воспроизведение завершено (${e.reason})`));
-player.on('exit', () => { console.log('mpv закрыт'); process.exit(0); });
+player.on('file-loaded', () => console.log('\n✓ File loaded'));
+player.on('end-file', (e) => console.log(`\n■ Playback ended (${e.reason})`));
+player.on('exit', () => { console.log('mpv closed'); process.exit(0); });
 
 try {
   await player.start();
 } catch (err) {
   console.error(err.message);
-  console.error('Проверьте, что mpv установлен и доступен в терминале командой "mpv".');
+  console.error('Make sure mpv is installed and available on the terminal as "mpv".');
   process.exit(1);
 }
-console.log('mpv запущен.' + HELP);
+console.log('mpv started.' + HELP);
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: 'tvbox> ' });
 rl.prompt();
@@ -74,8 +74,8 @@ rl.on('line', async (line) => {
       case 'vol': await player.setVolume(Number(arg)); break;
       case 'tracks': {
         const t = await player.tracks();
-        console.log('Аудио:'); console.table(t.audio);
-        console.log('Субтитры:'); console.table(t.subtitles);
+        console.log('Audio:'); console.table(t.audio);
+        console.log('Subtitles:'); console.table(t.subtitles);
         break;
       }
       case 'audio': await player.setAudioTrack(Number(arg)); break;
@@ -85,10 +85,10 @@ rl.on('line', async (line) => {
       case 'help': console.log(HELP); break;
       case 'q': await player.quit(); return;
       case '': break;
-      default: console.log('Неизвестная команда, введите help');
+      default: console.log('Unknown command, type help');
     }
   } catch (err) {
-    console.log('Ошибка:', err.message);
+    console.log('Error:', err.message);
   }
   rl.prompt();
 });
