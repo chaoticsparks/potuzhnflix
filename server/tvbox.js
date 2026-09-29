@@ -416,10 +416,13 @@ export class TvBox extends EventEmitter {
 
   #updateTv(list = this.libraryReady ? this.library.list() : []) {
     if (!this.tv) return;
+    const status = this.status();
     this.tv.setScene(this.poweringOff ? 'poweroff' : this.phase, {
       title: this.title,
       error: this.error,
-      episode: this.status().episode,
+      episode: status.episode,
+      // While playing: lets the buffering message say why (speed, or no peers), like the idle screen
+      download: status.download,
       warning: this.storageError ? 'Диск з фільмами не підключено' : null,
       reboot: this.poweringOff === 'reboot',
       // Recording to the shelf right now, fastest first; parts: "3/10" chosen episodes done

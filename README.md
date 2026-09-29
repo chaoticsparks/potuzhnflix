@@ -124,7 +124,8 @@ When nothing plays, the TV shows a synthwave night (striped sun, palms, a moving
 "ВСТАВТЕ КАСЕТУ", a clock, a QR code and the address of the phone remote, and what is downloading.
 While a film loads it shows an old-VCR blue screen, "ЗАВАНТАЖУЮ КАСЕТУ..."; during the film,
 VCR-style messages: ▶ PLAY, ❚❚ PAUSE with the tape counter, ▶▶ / ◀◀ after seeking, a green
-volume bar. It is all drawn by mpv's on-screen display, so it works on the Pi without a desktop.
+volume bar, and "ЗАВАНТАЖЕННЯ..." with the download speed (or "no peers") if it has to stop and
+buffer. It is all drawn by mpv's on-screen display, so it works on the Pi without a desktop.
 
 After 20 minutes on the idle screen with nobody using the remote, the TV goes dark with a dim
 clock (screen saver; downloads go on). Opening the remote or pressing anything brings it back.

@@ -86,9 +86,9 @@ Raspberry Pi OS Lite (64-bit), Node.js 20+ (ESM), WebTorrent, mpv, Fastify, WebS
    - Результат: готовая приставка.
 7. **Улучшения (по желанию).**
    - ~~HDMI-CEC: автовключение ТВ и переключение входа.~~ ✅ DONE (see `server/cec.js`): auto power-on + input switch at boot and on wake from the screen saver; the TV goes to standby when the screen saver starts.
-   - Продолжение просмотра с места остановки, история.
+   - ~~Продолжение просмотра с места остановки, история.~~ ✅ DONE (see `library.js`'s resume position / history): resumes any file exactly where it stopped; a "watch history" survives the download itself being deleted, with a one-tap re-download by magnet.
    - Автопоиск субтитров.
-   - Индикатор буферизации на ТВ.
+   - ~~Индикатор буферизации на ТВ.~~ ✅ DONE: "ЗАВАНТАЖЕННЯ..." now says why (download speed, or "no peers"), see `#vcrOsd()` in `tvscreen.js`.
 
 Этапы 1–5 разрабатываются на обычном компьютере, пока едет железо.
 
@@ -263,7 +263,7 @@ tvbox/
   - `loading`: blue, "▶ PLAY", "ЗАВАНТАЖУЮ КАСЕТУ..." (text only, like a real VCR), title and episode.
   - Blinking "_", counting "...", the clock's ":": the whole line is always laid out at full length and the "off" characters are drawn transparent (`text()` tail argument). libass drops trailing spaces, so padding with spaces made centred text jump.
   - `error`: blue, "■ STOP", "КАСЕТУ НЕ ПРОЧИТАНО_", error text wrapped (≤ 3 lines).
-  - `playing`: the blue loading screen stays until the film's first frame (`playback-restart`, fallback: position > 1 s), then transparent with VCR messages: "▶ PLAY" + "СЕРІЯ n/N" + title for 4 s at start; "❚❚ PAUSE" + tape counter while paused; "▶▶ / ◀◀ 0:01:06" after seeks (direction from position before `seek` vs after); "▶ PLAY" on resume; green 20-block VOLUME bar on volume change; blinking "ЗАВАНТАЖЕННЯ" top right while buffering > 0.7 s. Messages react to mpv events, so they also appear for changes not made from the phone.
+  - `playing`: the blue loading screen stays until the film's first frame (`playback-restart`, fallback: position > 1 s), then transparent with VCR messages: "▶ PLAY" + "СЕРІЯ n/N" + title for 4 s at start; "❚❚ PAUSE" + tape counter while paused; "▶▶ / ◀◀ 0:01:06" after seeks (direction from position before `seek` vs after); "▶ PLAY" on resume; green 20-block VOLUME bar on volume change; "ЗАВАНТАЖЕННЯ..." top right (growing dots, like the other loading messages — no longer a full blink) while buffering > 0.7 s, with why when it's known: the current item's download speed, or "НЕМАЄ ПІРІВ" specifically when it's stuck with zero peers (not just mid-negotiation, which stays plain dots). `TvBox.#updateTv()` passes `status().download` into the scene info for this. Messages react to mpv events, so they also appear for changes not made from the phone.
 - `TvBox` starts mpv in `init()`, so the TV shows the blue screen right after boot; if mpv is missing, the server still starts (error logged). `remoteUrl` = `TVBOX_URL` env or `http://<first LAN IPv4>:<port>`.
 - `TVBOX_MPV_ARGS` env: extra mpv options, e.g. `--geometry=960x540+40+40` for development.
 - Checked on Windows (window captures): idle (synthwave, QR decodes, grid moves), loading, start card, seek, resume, pause, volume.

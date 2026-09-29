@@ -345,9 +345,16 @@ export class TvScreen extends EventEmitter {
       }
     }
 
-    // Top right: buffering
-    if (this.bufferingSince && now - this.bufferingSince > BUFFERING_DELAY_MS && Math.floor(now / 500) % 2 === 0) {
-      out.push(text(W - MARGIN, MARGIN, 9, 36, WHITE, 'ЗАВАНТАЖЕННЯ'));
+    // Top right: buffering, like a real VCR ("ЗАВАНТАЖЕННЯ..."), with why it's slow if we know:
+    // download speed, or "no peers" when it's genuinely stuck rather than just mid-negotiation
+    if (this.bufferingSince && now - this.bufferingSince > BUFFERING_DELAY_MS) {
+      const dl = this.info.download;
+      let extra = '';
+      if (dl?.state === 'downloading') {
+        if (dl.downloadSpeed > 0) extra = ` ${(dl.downloadSpeed / 1024 ** 2).toFixed(1)} МБ/С`;
+        else if (dl.peers === 0) extra = ' НЕМАЄ ПІРІВ';
+      }
+      out.push(text(W - MARGIN, MARGIN, 9, 36, WHITE, 'ЗАВАНТАЖЕННЯ', '...', Math.floor(now / 400) % 4, extra));
     }
 
     // Bottom centre: volume bar
